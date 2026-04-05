@@ -194,26 +194,6 @@ export default function UsersPage() {
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               placeholder="输入密码" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-2">角色</label>
-            <div className="flex gap-3">
-              {[
-                { value: 'user', label: '普通用户', icon: User },
-                { value: 'admin', label: '管理员', icon: Shield },
-              ].map(({ value, label, icon: Icon }) => (
-                <button key={value}
-                  onClick={() => setForm(f => ({ ...f, role: value }))}
-                  className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
-                    form.role === value
-                      ? 'border-primary-500/50 bg-primary-500/10 text-primary-300'
-                      : 'border-surface-border text-gray-400 hover:bg-surface-hover'
-                  )}>
-                  <Icon size={16} />
-                  <span className="text-sm">{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="flex gap-3 pt-2">
             <button onClick={() => setShowNew(false)}
               className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
@@ -237,26 +217,6 @@ export default function UsersPage() {
             <input type="password" className="w-full input-base" value={form.password}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               placeholder="留空则不修改密码" />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-2">角色</label>
-            <div className="flex gap-3">
-              {[
-                { value: 'user', label: '普通用户', icon: User },
-                { value: 'admin', label: '管理员', icon: Shield },
-              ].map(({ value, label, icon: Icon }) => (
-                <button key={value}
-                  onClick={() => setForm(f => ({ ...f, role: value }))}
-                  className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
-                    form.role === value
-                      ? 'border-primary-500/50 bg-primary-500/10 text-primary-300'
-                      : 'border-surface-border text-gray-400 hover:bg-surface-hover'
-                  )}>
-                  <Icon size={16} />
-                  <span className="text-sm">{label}</span>
-                </button>
-              ))}
-            </div>
           </div>
           <div className="flex gap-3 pt-2">
             <button onClick={() => setEditUser(null)}

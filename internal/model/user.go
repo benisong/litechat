@@ -6,8 +6,9 @@ import "time"
 type User struct {
 	ID           string    `json:"id" db:"id"`
 	Username     string    `json:"username" db:"username"`
-	PasswordHash string    `json:"-" db:"password_hash"` // 密码哈希，不返回给前端
+	PasswordHash string    `json:"-" db:"password_hash"`
 	Role         string    `json:"role" db:"role"`       // admin / user
+	Mode         string    `json:"mode" db:"mode"`       // self / service（用户所属模式）
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }

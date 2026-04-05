@@ -39,14 +39,16 @@ func NewDB(dataDir string) (*DB, error) {
 // InitSchema 初始化数据库表结构
 func (db *DB) InitSchema() error {
 	schema := `
-	-- 用户表
+	-- 用户表（username + mode 组合唯一）
 	CREATE TABLE IF NOT EXISTS users (
 		id            TEXT PRIMARY KEY,
-		username      TEXT NOT NULL UNIQUE,
+		username      TEXT NOT NULL,
 		password_hash TEXT NOT NULL,
 		role          TEXT NOT NULL DEFAULT 'user',
+		mode          TEXT NOT NULL DEFAULT 'self',
 		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+		updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(username, mode)
 	);
 
 	-- 角色卡表
@@ -176,6 +178,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN order_num INTEGER DEFAULT 100`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)

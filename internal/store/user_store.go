@@ -22,13 +22,16 @@ func NewUserStore(db *DB) *UserStore {
 // Create 创建用户
 func (s *UserStore) Create(user *model.User) error {
 	user.ID = uuid.New().String()
+	if user.Mode == "" {
+		user.Mode = "self"
+	}
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		user.ID, user.Username, user.PasswordHash, user.Role, user.CreatedAt, user.UpdatedAt,
+		INSERT INTO users (id, username, password_hash, role, mode, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		user.ID, user.Username, user.PasswordHash, user.Role, user.Mode, user.CreatedAt, user.UpdatedAt,
 	)
 	return err
 }
@@ -37,33 +40,53 @@ func (s *UserStore) Create(user *model.User) error {
 func (s *UserStore) GetByID(id string) (*model.User, error) {
 	user := &model.User{}
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, created_at, updated_at
 		FROM users WHERE id = ?`, id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return user, nil
 }
 
-// GetByUsername 按用户名查询用户
+// GetByUsername 按用户名查询（admin 不区分 mode，普通用户按 mode 查询）
 func (s *UserStore) GetByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, created_at, updated_at
-		FROM users WHERE username = ?`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt)
+		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		FROM users WHERE username = ? AND role = 'admin'`, username,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	if err == nil {
+		return user, nil
+	}
+	// 非 admin，需要知道当前模式才能查。先返回第一个匹配的
+	err = s.db.QueryRow(`
+		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		FROM users WHERE username = ? ORDER BY created_at ASC LIMIT 1`, username,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	return user, err
+}
+
+// GetByUsernameAndMode 按用户名+模式查询（登录时用）
+func (s *UserStore) GetByUsernameAndMode(username, mode string) (*model.User, error) {
+	user := &model.User{}
+	// admin 用户不受 mode 限制
+	err := s.db.QueryRow(`
+		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		FROM users WHERE username = ? AND (role = 'admin' OR mode = ?)`, username, mode,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return user, nil
 }
 
-// List 查询所有用户
-func (s *UserStore) List() ([]*model.User, error) {
+// List 查询所有用户（按当前模式过滤，admin 始终可见）
+func (s *UserStore) List(mode string) ([]*model.User, error) {
 	rows, err := s.db.Query(`
-		SELECT id, username, password_hash, role, created_at, updated_at
-		FROM users ORDER BY created_at ASC`)
+		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		FROM users WHERE role = 'admin' OR mode = ?
+		ORDER BY role DESC, created_at ASC`, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +95,7 @@ func (s *UserStore) List() ([]*model.User, error) {
 	var list []*model.User
 	for rows.Next() {
 		user := &model.User{}
-		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, user)
@@ -114,7 +137,7 @@ func (s *UserStore) UpdateUsername(id, username string) error {
 	return nil
 }
 
-// UpdateUser 管理员更新用户信息（用户名、角色、密码）
+// UpdateUser 管理员更新用户信息（用户名、角色、密码，但不能改 role 为 admin）
 func (s *UserStore) UpdateUser(id, username, role, passwordHash string) error {
 	if passwordHash != "" {
 		_, err := s.db.Exec(`UPDATE users SET username=?, role=?, password_hash=?, updated_at=? WHERE id=?`,
@@ -126,7 +149,17 @@ func (s *UserStore) UpdateUser(id, username, role, passwordHash string) error {
 	return err
 }
 
-// EnsureInitialUsers 确保初始用户存在（如果没有任何用户，则创建默认管理员和普通用户）
+// GetCurrentMode 获取当前系统运行模式
+func (s *UserStore) GetCurrentMode() string {
+	var mode string
+	err := s.db.QueryRow(`SELECT value FROM configs WHERE key = 'service_mode'`).Scan(&mode)
+	if err != nil || mode == "" {
+		return "self"
+	}
+	return mode
+}
+
+// EnsureInitialUsers 确保初始用户存在
 func (s *UserStore) EnsureInitialUsers() error {
 	var count int
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
@@ -135,12 +168,12 @@ func (s *UserStore) EnsureInitialUsers() error {
 	}
 
 	if count > 0 {
-		return nil // 已有用户，无需创建
+		return nil
 	}
 
 	log.Println("未发现用户，创建默认用户...")
 
-	// 创建管理员用户
+	// admin 用户（mode 设为 self，admin 不受 mode 限制）
 	adminHash, err := auth.HashPassword("admin")
 	if err != nil {
 		return fmt.Errorf("生成管理员密码哈希失败: %w", err)
@@ -149,29 +182,42 @@ func (s *UserStore) EnsureInitialUsers() error {
 		Username:     "admin",
 		PasswordHash: adminHash,
 		Role:         "admin",
+		Mode:         "self",
 	}
 	if err := s.Create(adminUser); err != nil {
 		return fmt.Errorf("创建管理员用户失败: %w", err)
 	}
 	log.Printf("已创建管理员用户: admin (密码: admin)")
 
-	// 创建普通用户
+	// 自用模式普通用户
 	userHash, err := auth.HashPassword("user")
 	if err != nil {
 		return fmt.Errorf("生成用户密码哈希失败: %w", err)
 	}
-	normalUser := &model.User{
+	selfUser := &model.User{
 		Username:     "user1",
 		PasswordHash: userHash,
 		Role:         "user",
+		Mode:         "self",
 	}
-	if err := s.Create(normalUser); err != nil {
-		return fmt.Errorf("创建普通用户失败: %w", err)
+	if err := s.Create(selfUser); err != nil {
+		return fmt.Errorf("创建自用模式用户失败: %w", err)
 	}
-	log.Printf("已创建普通用户: user1 (密码: user)")
+	log.Printf("已创建自用模式用户: user1 (密码: user)")
+	s.CreateDefaultCharacter(selfUser.ID)
 
-	// 为普通用户创建默认角色卡
-	s.CreateDefaultCharacter(normalUser.ID)
+	// 服务模式普通用户
+	serviceUser := &model.User{
+		Username:     "user1",
+		PasswordHash: userHash,
+		Role:         "user",
+		Mode:         "service",
+	}
+	if err := s.Create(serviceUser); err != nil {
+		return fmt.Errorf("创建服务模式用户失败: %w", err)
+	}
+	log.Printf("已创建服务模式用户: user1 (密码: user)")
+	s.CreateDefaultCharacter(serviceUser.ID)
 
 	return nil
 }
@@ -182,16 +228,13 @@ func (s *UserStore) CreateDefaultCharacter(userID string) {
 	_, err := s.db.Exec(`
 		INSERT OR IGNORE INTO characters (id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		uuid.New().String(),
-		userID,
+		uuid.New().String(), userID,
 		"小助手",
 		"一个友善的 AI 聊天助手，喜欢帮助别人解决问题。",
 		"温柔、耐心、幽默，说话简洁有条理。偶尔会开小玩笑活跃气氛。",
 		"你正在和用户进行一对一的文字聊天。",
 		"你好呀！我是小助手，有什么我可以帮你的吗？😊",
-		"",
-		"助手,默认",
-		now, now,
+		"", "助手,默认", now, now,
 	)
 	if err != nil {
 		log.Printf("创建默认角色卡失败: %v", err)

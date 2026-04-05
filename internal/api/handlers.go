@@ -58,8 +58,9 @@ func (h *Handlers) Login(c *gin.Context) {
 		return
 	}
 
-	// 查找用户
-	user, err := h.userStore.GetByUsername(req.Username)
+	// 查找用户（按当前运行模式）
+	currentMode := h.userStore.GetCurrentMode()
+	user, err := h.userStore.GetByUsernameAndMode(req.Username, currentMode)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
@@ -103,28 +104,36 @@ func (h *Handlers) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// 检查用户名是否已存在
-	if _, err := h.userStore.GetByUsername(req.Username); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
+	// admin 用户唯一，不允许创建
+	role := req.Role
+	if role == "admin" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "管理员账户唯一，不能创建新管理员"})
+		return
+	}
+	if role == "" {
+		role = "user"
+	}
+
+	// 获取当前运行模式
+	currentMode := h.userStore.GetCurrentMode()
+
+	// 检查同模式下用户名是否已存在
+	if existing, err := h.userStore.GetByUsernameAndMode(req.Username, currentMode); err == nil && existing.Role != "admin" {
+		c.JSON(http.StatusConflict, gin.H{"error": "该用户名在当前模式下已存在"})
 		return
 	}
 
-	// 哈希密码
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 		return
 	}
 
-	role := req.Role
-	if role == "" {
-		role = "user"
-	}
-
 	user := &model.User{
 		Username:     req.Username,
 		PasswordHash: hash,
 		Role:         role,
+		Mode:         currentMode,
 	}
 
 	if err := h.userStore.Create(user); err != nil {
@@ -132,17 +141,14 @@ func (h *Handlers) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// 为新用户创建默认角色卡
-	if role == "user" {
-		h.userStore.CreateDefaultCharacter(user.ID)
-	}
-
+	h.userStore.CreateDefaultCharacter(user.ID)
 	c.JSON(http.StatusCreated, user)
 }
 
-// ListUsers GET /api/auth/users 列出所有用户（管理员）
+// ListUsers GET /api/auth/users 列出当前模式下的用户（管理员）
 func (h *Handlers) ListUsers(c *gin.Context) {
-	users, err := h.userStore.List()
+	currentMode := h.userStore.GetCurrentMode()
+	users, err := h.userStore.List(currentMode)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -218,6 +224,12 @@ func (h *Handlers) UpdateUser(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 禁止将角色改为 admin
+	if req.Role == "admin" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能将用户提升为管理员"})
 		return
 	}
 
