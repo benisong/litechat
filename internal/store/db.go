@@ -81,11 +81,12 @@ func (db *DB) InitSchema() error {
 
 	-- 世界书表
 	CREATE TABLE IF NOT EXISTS world_books (
-		id          TEXT PRIMARY KEY,
-		user_id     TEXT DEFAULT '',
-		name        TEXT NOT NULL,
-		description TEXT DEFAULT '',
-		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		id           TEXT PRIMARY KEY,
+		user_id      TEXT DEFAULT '',
+		character_id TEXT DEFAULT '',
+		name         TEXT NOT NULL,
+		description  TEXT DEFAULT '',
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -174,6 +175,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN case_sensitive INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN order_num INTEGER DEFAULT 100`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
+	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)

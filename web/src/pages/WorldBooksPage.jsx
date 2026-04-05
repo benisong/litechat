@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRight,
-         ChevronDown, ChevronUp, Pin, Search as SearchIcon } from 'lucide-react'
-import { useWorldBookStore, useUIStore } from '../store'
+         ChevronDown, ChevronUp, Pin, Search as SearchIcon, Globe, User } from 'lucide-react'
+import { useWorldBookStore, useCharacterStore, useUIStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
@@ -23,15 +23,17 @@ export default function WorldBooksPage() {
           fetchWorldBook, createEntry, updateEntry, deleteEntry } = useWorldBookStore()
   const { showToast } = useUIStore()
 
+  const { characters, fetchCharacters } = useCharacterStore()
+
   const [view, setView] = useState('list')
   const [showNewBook, setShowNewBook] = useState(false)
-  const [newBookForm, setNewBookForm] = useState({ name: '', description: '' })
+  const [newBookForm, setNewBookForm] = useState({ name: '', description: '', character_id: '' })
   const [showEntryEditor, setShowEntryEditor] = useState(false)
   const [entryForm, setEntryForm] = useState({ ...DEFAULT_ENTRY })
   const [editEntry, setEditEntry] = useState(null)
   const [expandedEntry, setExpandedEntry] = useState(null) // 条目列表中展开详情
 
-  useEffect(() => { fetchWorldBooks() }, [])
+  useEffect(() => { fetchWorldBooks(); fetchCharacters() }, [])
 
   const handleOpenBook = async (id) => {
     await fetchWorldBook(id)
@@ -43,7 +45,7 @@ export default function WorldBooksPage() {
     try {
       await createWorldBook(newBookForm)
       setShowNewBook(false)
-      setNewBookForm({ name: '', description: '' })
+      setNewBookForm({ name: '', description: '', character_id: '' })
       showToast('世界书创建成功', 'success')
     } catch { showToast('创建失败', 'error') }
   }
@@ -349,12 +351,28 @@ export default function WorldBooksPage() {
             onClick={() => handleOpenBook(wb.id)}
             className="card p-4 flex items-center gap-3 cursor-pointer
                        hover:bg-surface-hover active:scale-[0.99] transition-all duration-150">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20
-                            border border-amber-500/20 flex items-center justify-center flex-shrink-0">
-              <BookOpen size={20} className="text-amber-400" />
+            <div className={clsx(
+              'w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 border',
+              wb.character_id
+                ? 'bg-gradient-to-br from-purple-500/20 to-pink-500/20 border-purple-500/20'
+                : 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 border-amber-500/20'
+            )}>
+              {wb.character_id
+                ? <User size={20} className="text-purple-400" />
+                : <Globe size={20} className="text-amber-400" />
+              }
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">{wb.name}</p>
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="font-semibold text-sm">{wb.name}</p>
+                <span className={clsx('text-[10px] px-1.5 py-0.5 rounded-full border',
+                  wb.character_id
+                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                )}>
+                  {wb.character_id ? (wb.character_name || '角色') : '全局'}
+                </span>
+              </div>
               <p className="text-xs text-gray-500 truncate">{wb.description || '暂无描述'}</p>
             </div>
             <div className="flex items-center gap-2">
@@ -370,6 +388,47 @@ export default function WorldBooksPage() {
 
       <Modal open={showNewBook} onClose={() => setShowNewBook(false)} title="新建世界书">
         <div className="space-y-4">
+          {/* 类型选择 */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-2">类型</label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setNewBookForm(f => ({ ...f, character_id: '' }))}
+                className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
+                  !newBookForm.character_id
+                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
+                    : 'border-surface-border text-gray-400 hover:bg-surface-hover'
+                )}>
+                <Globe size={16} />
+                <span className="text-sm">全局</span>
+              </button>
+              <button
+                onClick={() => setNewBookForm(f => ({ ...f, character_id: characters[0]?.id || '' }))}
+                className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
+                  newBookForm.character_id
+                    ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
+                    : 'border-surface-border text-gray-400 hover:bg-surface-hover'
+                )}>
+                <User size={16} />
+                <span className="text-sm">绑定角色</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 角色选择（仅绑定模式） */}
+          {newBookForm.character_id !== '' && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">选择角色</label>
+              <select className="w-full input-base text-sm bg-surface appearance-none"
+                value={newBookForm.character_id}
+                onChange={e => setNewBookForm(f => ({ ...f, character_id: e.target.value }))}>
+                {characters.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">名称 *</label>
             <input className="w-full input-base" value={newBookForm.name}

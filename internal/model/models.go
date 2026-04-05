@@ -73,12 +73,14 @@ type PromptEntry struct {
 type WorldBook struct {
 	ID          string    `json:"id" db:"id"`
 	UserID      string    `json:"user_id" db:"user_id"`
+	CharacterID string    `json:"character_id" db:"character_id"` // 空=全局，有值=绑定角色
 	Name        string    `json:"name" db:"name"`
 	Description string    `json:"description" db:"description"`
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
-	// 关联条目（非数据库字段）
-	Entries     []WorldBookEntry `json:"entries,omitempty" db:"-"`
+	// 关联数据（非数据库字段）
+	Entries       []WorldBookEntry `json:"entries,omitempty" db:"-"`
+	CharacterName string           `json:"character_name,omitempty" db:"-"`
 }
 
 // WorldBookEntry 世界书条目（SillyTavern Lorebook 兼容）

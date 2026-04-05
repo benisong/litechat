@@ -386,10 +386,10 @@ func sortEntries(entries []model.PromptEntry) {
 	}
 }
 
-// injectWorldBookEntries 扫描聊天历史，将关键词匹配的世界书条目注入到消息列表中
+// injectWorldBookEntries 扫描聊天历史，将全局+角色绑定的世界书条目注入到消息列表中
 func (s *ChatService) injectWorldBookEntries(messages []model.ChatCompletionMessage, chatHistory []model.ChatCompletionMessage, char *model.Character, userID string) []model.ChatCompletionMessage {
-	// 获取当前用户所有启用的世界书条目
-	allEntries, err := s.worldBookStore.ListAllEntries(userID)
+	// 获取全局 + 当前角色绑定的世界书条目
+	allEntries, err := s.worldBookStore.ListAllEntries(userID, char.ID)
 	if err != nil {
 		log.Printf("[世界书] 加载条目失败: %v", err)
 		return messages

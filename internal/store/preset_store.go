@@ -124,9 +124,9 @@ func (s *WorldBookStore) Create(wb *model.WorldBook, userID string) error {
 	wb.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO world_books (id, user_id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		wb.ID, wb.UserID, wb.Name, wb.Description, wb.CreatedAt, wb.UpdatedAt,
+		INSERT INTO world_books (id, user_id, character_id, name, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		wb.ID, wb.UserID, wb.CharacterID, wb.Name, wb.Description, wb.CreatedAt, wb.UpdatedAt,
 	)
 	return err
 }
@@ -134,13 +134,12 @@ func (s *WorldBookStore) Create(wb *model.WorldBook, userID string) error {
 func (s *WorldBookStore) GetByID(id string, userID string) (*model.WorldBook, error) {
 	wb := &model.WorldBook{}
 	err := s.db.QueryRow(`
-		SELECT id, user_id, name, description, created_at, updated_at
+		SELECT id, user_id, character_id, name, description, created_at, updated_at
 		FROM world_books WHERE id = ? AND user_id = ?`, id, userID,
-	).Scan(&wb.ID, &wb.UserID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt)
+	).Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
-	// 加载条目
 	entries, err := s.ListEntries(id, userID)
 	if err != nil {
 		return nil, err
@@ -151,8 +150,11 @@ func (s *WorldBookStore) GetByID(id string, userID string) (*model.WorldBook, er
 
 func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, name, description, created_at, updated_at
-		FROM world_books WHERE user_id = ? ORDER BY updated_at DESC`, userID)
+		SELECT wb.id, wb.user_id, wb.character_id, wb.name, wb.description, wb.created_at, wb.updated_at,
+		       COALESCE(ch.name, '') as char_name
+		FROM world_books wb
+		LEFT JOIN characters ch ON ch.id = wb.character_id
+		WHERE wb.user_id = ? ORDER BY wb.character_id ASC, wb.updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,8 @@ func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 	var list []*model.WorldBook
 	for rows.Next() {
 		wb := &model.WorldBook{}
-		if err := rows.Scan(&wb.ID, &wb.UserID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt); err != nil {
+		if err := rows.Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description,
+			&wb.CreatedAt, &wb.UpdatedAt, &wb.CharacterName); err != nil {
 			return nil, err
 		}
 		list = append(list, wb)
@@ -172,8 +175,8 @@ func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 func (s *WorldBookStore) Update(wb *model.WorldBook, userID string) error {
 	wb.UpdatedAt = time.Now()
 	_, err := s.db.Exec(`
-		UPDATE world_books SET name=?, description=?, updated_at=? WHERE id=? AND user_id=?`,
-		wb.Name, wb.Description, wb.UpdatedAt, wb.ID, userID,
+		UPDATE world_books SET name=?, description=?, character_id=?, updated_at=? WHERE id=? AND user_id=?`,
+		wb.Name, wb.Description, wb.CharacterID, wb.UpdatedAt, wb.ID, userID,
 	)
 	return err
 }
@@ -237,13 +240,17 @@ func (s *WorldBookStore) ListEntries(worldBookID string, userID string) ([]model
 }
 
 // ListAllEntries 查询当前用户所有世界书的全部启用条目（用于聊天时扫描）
-func (s *WorldBookStore) ListAllEntries(userID string) ([]model.WorldBookEntry, error) {
+// ListAllEntries 查询全局 + 指定角色绑定的世界书条目（聊天时用）
+func (s *WorldBookStore) ListAllEntries(userID string, characterID string) ([]model.WorldBookEntry, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
-		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
-		       created_at, updated_at
-		FROM world_book_entries WHERE enabled = 1 AND user_id = ?
-		ORDER BY priority DESC, order_num ASC`, userID)
+		SELECT e.id, e.user_id, e.world_book_id, e.keys, e.secondary_keys, e.content, e.enabled, e.constant, e.priority,
+		       e.injection_position, e.injection_depth, e.scan_depth, e.case_sensitive, e.order_num, e.role,
+		       e.created_at, e.updated_at
+		FROM world_book_entries e
+		JOIN world_books wb ON wb.id = e.world_book_id
+		WHERE e.enabled = 1 AND e.user_id = ?
+		  AND (wb.character_id = '' OR wb.character_id = ?)
+		ORDER BY e.priority DESC, e.order_num ASC`, userID, characterID)
 	if err != nil {
 		return nil, err
 	}
