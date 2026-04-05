@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import clsx from 'clsx'
 import Avatar from '../ui/Avatar'
+import MessageContent from './MessageContent'
 import { Trash2, Copy, Check, RefreshCw } from 'lucide-react'
 import { useChatStore } from '../../store'
 
@@ -53,28 +54,35 @@ export default function MessageBubble({ message, character, onRegenerate }) {
         {/* 气泡内容 */}
         <div
           className={clsx(
-            'text-sm leading-relaxed whitespace-pre-wrap break-words',
+            'text-sm leading-relaxed break-words',
             isUser ? 'bubble-user' : 'bubble-ai',
             isStreaming && !message.content && 'min-w-[60px] min-h-[36px]'
           )}
         >
-          {message.content || (isStreaming ? '' : '...')}
-          {isStreaming && <span className="typing-cursor" />}
+          {isUser ? (
+            // 用户消息：保留空白格式
+            <span className="whitespace-pre-wrap">{message.content}</span>
+          ) : (
+            // AI 消息：渲染 markdown + 思考块
+            <>
+              <MessageContent content={message.content} isUser={false} />
+              {isStreaming && <span className="typing-cursor" />}
+            </>
+          )}
+          {!message.content && isStreaming && <span className="typing-cursor" />}
         </div>
 
-        {/* 操作按钮 — 始终显示在气泡下方 */}
+        {/* 操作按钮 */}
         {!isStreaming && message.content && (
           <div className={clsx(
             'flex items-center gap-1.5 px-0.5',
             isUser ? 'flex-row-reverse' : 'flex-row'
           )}>
-            {/* 复制 */}
             <button onClick={handleCopy}
               className="p-1 rounded-md text-gray-500 hover:text-gray-300 transition-colors">
               {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
             </button>
 
-            {/* AI 消息：重新生成 */}
             {!isUser && onRegenerate && !isTemp && (
               <button onClick={(e) => { e.stopPropagation(); onRegenerate() }}
                 className="p-1 rounded-md text-gray-500 hover:text-gray-300 transition-colors">
@@ -82,7 +90,6 @@ export default function MessageBubble({ message, character, onRegenerate }) {
               </button>
             )}
 
-            {/* 删除 */}
             {!isTemp && (
               <button onClick={handleDelete}
                 className="p-1 rounded-md text-gray-500 hover:text-red-400 transition-colors">
@@ -90,7 +97,6 @@ export default function MessageBubble({ message, character, onRegenerate }) {
               </button>
             )}
 
-            {/* 时间 */}
             <span className="text-[10px] text-gray-600 px-0.5">
               {new Date(message.created_at).toLocaleTimeString('zh-CN', {
                 hour: '2-digit', minute: '2-digit'

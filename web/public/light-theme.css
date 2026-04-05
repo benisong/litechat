@@ -44,3 +44,8 @@ html.light select, html.light select option { background: #fff !important; color
 
 /* Modal */
 html.light .bg-black\/60            { background-color: rgba(0,0,0,0.3) !important; }
+
+/* Markdown 代码块 */
+html.light .msg-content pre         { background: rgba(0,0,0,0.05) !important; }
+html.light .msg-content code        { background: rgba(139,92,246,0.1) !important; }
+html.light .msg-content hr          { border-top-color: rgba(0,0,0,0.1) !important; }
