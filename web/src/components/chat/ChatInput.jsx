@@ -35,7 +35,7 @@ export default function ChatInput({ onSend, disabled }) {
 
   return (
     <div className="glass border-t border-surface-border px-4 py-3
-                    pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+                    pb-[calc(env(safe-area-inset-bottom,0px)+1rem)]">
       <div className="flex items-end gap-3">
         <textarea
           ref={textareaRef}

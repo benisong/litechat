@@ -46,7 +46,7 @@ export default function AdminLayout() {
       {/* 底部导航 */}
       <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg
                       glass border-t border-surface-border
-                      pb-[env(safe-area-inset-bottom)] z-50">
+                      pb-[calc(env(safe-area-inset-bottom,0px)+0.25rem)] z-50">
         <div className="flex items-center justify-around h-16">
           {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
             const active = location.pathname === path
