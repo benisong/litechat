@@ -1,20 +1,35 @@
 import React, { useEffect, useState } from 'react'
-import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRight } from 'lucide-react'
+import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRight,
+         ChevronDown, ChevronUp, Pin, Search as SearchIcon } from 'lucide-react'
 import { useWorldBookStore, useUIStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
+import clsx from 'clsx'
+
+const ROLE_OPTIONS = [
+  { value: 'system', label: '系统', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
+  { value: 'user', label: '用户', color: 'text-green-400 bg-green-500/10 border-green-500/30' },
+  { value: 'assistant', label: '助手', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
+]
+
+const DEFAULT_ENTRY = {
+  keys: '', secondary_keys: '', content: '', enabled: true, constant: false,
+  priority: 0, injection_position: 0, injection_depth: 4, scan_depth: 0,
+  case_sensitive: false, order: 100, role: 'system',
+}
 
 export default function WorldBooksPage() {
   const { worldBooks, currentBook, fetchWorldBooks, createWorldBook, deleteWorldBook,
           fetchWorldBook, createEntry, updateEntry, deleteEntry } = useWorldBookStore()
   const { showToast } = useUIStore()
 
-  const [view, setView] = useState('list') // 'list' | 'book'
+  const [view, setView] = useState('list')
   const [showNewBook, setShowNewBook] = useState(false)
   const [newBookForm, setNewBookForm] = useState({ name: '', description: '' })
-  const [showNewEntry, setShowNewEntry] = useState(false)
-  const [entryForm, setEntryForm] = useState({ keys: '', content: '', enabled: true, priority: 0 })
+  const [showEntryEditor, setShowEntryEditor] = useState(false)
+  const [entryForm, setEntryForm] = useState({ ...DEFAULT_ENTRY })
   const [editEntry, setEditEntry] = useState(null)
+  const [expandedEntry, setExpandedEntry] = useState(null) // 条目列表中展开详情
 
   useEffect(() => { fetchWorldBooks() }, [])
 
@@ -41,6 +56,17 @@ export default function WorldBooksPage() {
     } catch { showToast('删除失败', 'error') }
   }
 
+  const openEntryEditor = (entry = null) => {
+    if (entry) {
+      setEntryForm({ ...DEFAULT_ENTRY, ...entry })
+      setEditEntry(entry)
+    } else {
+      setEntryForm({ ...DEFAULT_ENTRY })
+      setEditEntry(null)
+    }
+    setShowEntryEditor(true)
+  }
+
   const handleSaveEntry = async () => {
     if (!entryForm.content.trim()) { showToast('请填写条目内容', 'error'); return }
     try {
@@ -51,9 +77,8 @@ export default function WorldBooksPage() {
         await createEntry(currentBook.id, entryForm)
         showToast('条目已添加', 'success')
       }
-      setShowNewEntry(false)
+      setShowEntryEditor(false)
       setEditEntry(null)
-      setEntryForm({ keys: '', content: '', enabled: true, priority: 0 })
     } catch { showToast('保存失败', 'error') }
   }
 
@@ -63,7 +88,9 @@ export default function WorldBooksPage() {
     } catch { showToast('操作失败', 'error') }
   }
 
+  // 世界书条目详情视图
   if (view === 'book' && currentBook) {
+    const entries = currentBook.entries || []
     return (
       <div className="flex flex-col h-full">
         <div className="px-4 pt-12 pb-4 flex items-center gap-3">
@@ -77,90 +104,223 @@ export default function WorldBooksPage() {
             )}
           </div>
           <button
-            onClick={() => { setEntryForm({ keys: '', content: '', enabled: true, priority: 0 }); setEditEntry(null); setShowNewEntry(true) }}
+            onClick={() => openEntryEditor()}
             className="btn-primary flex items-center gap-1.5 py-2 px-3 text-sm"
           >
-            <Plus size={15} /> 添加条目
+            <Plus size={15} /> 添加
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 space-y-2">
-          {(!currentBook.entries || currentBook.entries.length === 0) ? (
+        <div className="flex-1 overflow-y-auto px-4 space-y-2 pb-4">
+          {entries.length === 0 ? (
             <EmptyState icon={BookOpen} title="还没有条目" description="添加关键词触发的知识条目" />
-          ) : currentBook.entries.map(entry => (
-            <div
-              key={entry.id}
-              className="card p-4 cursor-pointer hover:bg-surface-hover transition-colors"
-              onClick={() => { setEntryForm({ ...entry }); setEditEntry(entry); setShowNewEntry(true) }}
+          ) : entries.map(entry => (
+            <div key={entry.id}
+              className={clsx(
+                'card overflow-hidden transition-colors',
+                !entry.enabled && 'opacity-50'
+              )}
             >
-              <div className="flex items-start justify-between gap-2">
+              {/* 条目头部摘要 */}
+              <div className="flex items-center gap-2 p-3 cursor-pointer hover:bg-surface-hover"
+                onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}>
+                {/* 常驻标记 */}
+                {entry.constant && <Pin size={13} className="text-amber-400 flex-shrink-0" />}
+
+                {/* 角色标签 */}
+                <span className={clsx('text-[10px] px-1.5 py-0.5 rounded border font-medium flex-shrink-0',
+                  ROLE_OPTIONS.find(r => r.value === entry.role)?.color || ROLE_OPTIONS[0].color
+                )}>
+                  {ROLE_OPTIONS.find(r => r.value === entry.role)?.label || '系统'}
+                </span>
+
+                {/* 关键词 */}
                 <div className="flex-1 min-w-0">
-                  {entry.keys && (
-                    <div className="flex gap-1.5 flex-wrap mb-2">
-                      {entry.keys.split(',').map(k => k.trim()).filter(Boolean).map(k => (
-                        <span key={k} className="text-[11px] bg-primary-500/20 text-primary-300
-                                                  px-2 py-0.5 rounded-full border border-primary-500/20">
+                  {entry.keys ? (
+                    <div className="flex gap-1 flex-wrap">
+                      {entry.keys.split(',').slice(0, 3).map(k => k.trim()).filter(Boolean).map(k => (
+                        <span key={k} className="text-[11px] bg-primary-500/15 text-primary-300
+                                                  px-1.5 py-0.5 rounded border border-primary-500/20">
                           {k}
                         </span>
                       ))}
+                      {entry.keys.split(',').length > 3 && (
+                        <span className="text-[10px] text-gray-500">+{entry.keys.split(',').length - 3}</span>
+                      )}
                     </div>
+                  ) : entry.constant ? (
+                    <span className="text-xs text-amber-400">常驻注入</span>
+                  ) : (
+                    <span className="text-xs text-gray-500">无关键词</span>
                   )}
-                  <p className="text-sm text-gray-300 line-clamp-3">{entry.content}</p>
-                  <p className="text-xs text-gray-600 mt-1">优先级 {entry.priority}</p>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button onClick={e => { e.stopPropagation(); handleToggleEntry(entry) }}>
-                    {entry.enabled
-                      ? <ToggleRight size={20} className="text-primary-400" />
-                      : <ToggleLeft size={20} className="text-gray-600" />
-                    }
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); deleteEntry(entry.id) }}
-                    className="p-1.5 text-gray-600 hover:text-red-400 transition-colors">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+
+                {/* 深度 */}
+                <span className="text-[10px] text-gray-600 flex-shrink-0">
+                  D{entry.injection_depth || 0}
+                </span>
+
+                {/* 开关 */}
+                <button onClick={e => { e.stopPropagation(); handleToggleEntry(entry) }}>
+                  {entry.enabled
+                    ? <ToggleRight size={18} className="text-primary-400" />
+                    : <ToggleLeft size={18} className="text-gray-600" />
+                  }
+                </button>
+
+                {/* 展开/折叠 */}
+                {expandedEntry === entry.id
+                  ? <ChevronUp size={16} className="text-gray-500" />
+                  : <ChevronDown size={16} className="text-gray-500" />
+                }
               </div>
+
+              {/* 展开详情 */}
+              {expandedEntry === entry.id && (
+                <div className="px-3 pb-3 border-t border-surface-border/50 space-y-2 pt-2">
+                  <p className="text-xs text-gray-300 whitespace-pre-wrap line-clamp-4">{entry.content}</p>
+
+                  <div className="flex gap-2 flex-wrap text-[10px] text-gray-500">
+                    <span>优先级 {entry.priority}</span>
+                    <span>深度 {entry.injection_depth}</span>
+                    <span>{entry.injection_position === 1 ? '绝对' : '相对'}位置</span>
+                    {entry.scan_depth > 0 && <span>扫描 {entry.scan_depth} 条</span>}
+                    {entry.case_sensitive && <span>大小写敏感</span>}
+                    {entry.secondary_keys && <span>AND: {entry.secondary_keys}</span>}
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => openEntryEditor(entry)}
+                      className="flex-1 py-2 text-xs text-center rounded-lg bg-primary-600/20 text-primary-300
+                                 hover:bg-primary-600/30 transition-colors"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      onClick={() => deleteEntry(entry.id)}
+                      className="py-2 px-4 text-xs rounded-lg bg-red-500/10 text-red-400
+                                 hover:bg-red-500/20 transition-colors"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
 
         {/* 条目编辑弹窗 */}
-        <Modal open={showNewEntry} onClose={() => { setShowNewEntry(false); setEditEntry(null) }}
+        <Modal open={showEntryEditor} onClose={() => { setShowEntryEditor(false); setEditEntry(null) }}
           title={editEntry ? '编辑条目' : '新建条目'}>
           <div className="space-y-4">
+            {/* 关键词 */}
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">触发关键词（逗号分隔）</label>
-              <input className="w-full input-base" value={entryForm.keys}
+              <label className="block text-xs text-gray-400 mb-1.5">主关键词（逗号分隔，OR 逻辑）</label>
+              <input className="w-full input-base text-sm" value={entryForm.keys}
                 onChange={e => setEntryForm(f => ({ ...f, keys: e.target.value }))}
-                placeholder="例如：魔法，法师，魔法学院" />
+                placeholder="例如：魔法,法师,魔法学院" />
             </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">次关键词（逗号分隔，AND 逻辑，需同时命中）</label>
+              <input className="w-full input-base text-sm" value={entryForm.secondary_keys}
+                onChange={e => setEntryForm(f => ({ ...f, secondary_keys: e.target.value }))}
+                placeholder="留空则只看主关键词" />
+            </div>
+
+            {/* 内容 */}
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">注入内容 *</label>
-              <textarea className="w-full input-base resize-none" rows={5}
+              <textarea className="w-full input-base resize-none text-sm" rows={5}
                 value={entryForm.content}
                 onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
-                placeholder="当对话中出现关键词时，此内容将被注入到上下文中" />
+                placeholder="当关键词命中时，此内容将被注入到上下文中" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+
+            {/* 注入配置 - 第一行 */}
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="block text-xs text-gray-400 mb-1.5">优先级</label>
-                <input type="number" className="w-full input-base" value={entryForm.priority}
+                <label className="block text-[10px] text-gray-500 mb-1">角色</label>
+                <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
+                  value={entryForm.role}
+                  onChange={e => setEntryForm(f => ({ ...f, role: e.target.value }))}>
+                  {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1">注入方式</label>
+                <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
+                  value={entryForm.injection_position}
+                  onChange={e => setEntryForm(f => ({ ...f, injection_position: parseInt(e.target.value) }))}>
+                  <option value={0}>相对末尾</option>
+                  <option value={1}>绝对位置</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1">注入深度</label>
+                <input type="number" className="w-full input-base text-xs py-2" min="0"
+                  value={entryForm.injection_depth}
+                  onChange={e => setEntryForm(f => ({ ...f, injection_depth: parseInt(e.target.value) || 0 }))} />
+              </div>
+            </div>
+
+            {/* 注入配置 - 第二行 */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1">扫描深度</label>
+                <input type="number" className="w-full input-base text-xs py-2" min="0"
+                  value={entryForm.scan_depth}
+                  onChange={e => setEntryForm(f => ({ ...f, scan_depth: parseInt(e.target.value) || 0 }))} />
+                <p className="text-[9px] text-gray-600 mt-0.5">0=全部消息</p>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1">优先级</label>
+                <input type="number" className="w-full input-base text-xs py-2"
+                  value={entryForm.priority}
                   onChange={e => setEntryForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1.5">状态</label>
-                <label className="flex items-center gap-2 cursor-pointer h-11 px-3 bg-surface
-                                   border border-surface-border rounded-xl">
-                  <input type="checkbox" checked={entryForm.enabled}
-                    onChange={e => setEntryForm(f => ({ ...f, enabled: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-violet-500" />
-                  <span className="text-sm">启用</span>
-                </label>
+                <label className="block text-[10px] text-gray-500 mb-1">排序</label>
+                <input type="number" className="w-full input-base text-xs py-2"
+                  value={entryForm.order}
+                  onChange={e => setEntryForm(f => ({ ...f, order: parseInt(e.target.value) || 0 }))} />
               </div>
             </div>
+
+            {/* 开关选项 */}
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { key: 'enabled', label: '启用' },
+                { key: 'constant', label: '常驻（无需关键词）' },
+                { key: 'case_sensitive', label: '大小写敏感' },
+              ].map(({ key, label }) => (
+                <label key={key} className={clsx(
+                  'flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border text-xs transition-colors',
+                  entryForm[key]
+                    ? 'border-primary-500/40 bg-primary-500/10 text-primary-300'
+                    : 'border-surface-border text-gray-500 hover:bg-surface-hover'
+                )}>
+                  <input type="checkbox" checked={entryForm[key]}
+                    onChange={e => setEntryForm(f => ({ ...f, [key]: e.target.checked }))}
+                    className="hidden" />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* 说明 */}
+            <div className="text-[10px] text-gray-600 bg-surface/50 p-3 rounded-lg border border-surface-border leading-relaxed">
+              <p><b>主关键词</b>: OR 逻辑，任一命中即触发</p>
+              <p><b>次关键词</b>: AND 逻辑，需与主关键词同时命中</p>
+              <p><b>深度0</b>=紧跟系统提示词 | <b>深度N(相对)</b>=从末尾倒数第N条 | <b>深度N(绝对)</b>=第N条后</p>
+              <p><b>常驻</b>: 无需关键词触发，每次对话都注入</p>
+              <p><b>扫描深度</b>: 往回扫描几条消息寻找关键词，0=扫描全部</p>
+            </div>
+
             <div className="flex gap-3 pt-2">
-              <button onClick={() => { setShowNewEntry(false); setEditEntry(null) }}
+              <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}
                 className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
                            hover:bg-surface-hover transition-colors">取消</button>
               <button onClick={handleSaveEntry} className="flex-1 btn-primary py-3">保存</button>

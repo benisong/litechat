@@ -1,0 +1,46 @@
+/* 浅色模式覆盖 — 放在 public 目录不经过 PostCSS 处理，!important 保留 */
+
+/* 背景 */
+html.light body                     { background-color: #f8f9fa !important; color: #212529 !important; }
+html.light .bg-dark-400             { background-color: #f8f9fa !important; }
+html.light .bg-dark-300             { background-color: #f1f3f5 !important; }
+html.light .bg-dark-200             { background-color: #f1f3f5 !important; }
+html.light .bg-dark-100             { background-color: #ffffff !important; }
+html.light .bg-dark-50              { background-color: #ffffff !important; }
+html.light .bg-surface              { background-color: #ffffff !important; }
+html.light .bg-surface-hover        { background-color: #f1f3f5 !important; }
+
+/* 卡片 / 玻璃 / 输入框 / 气泡 */
+html.light .card                    { background-color: #ffffff !important; border-color: #dee2e6 !important; }
+html.light .glass                   { background: rgba(255,255,255,0.88) !important; border-color: #dee2e6 !important; }
+html.light .input-base              { background-color: #ffffff !important; border-color: #dee2e6 !important; color: #212529 !important; }
+html.light .bubble-ai               { background-color: #f1f3f5 !important; border-color: rgba(0,0,0,0.08) !important; color: #212529 !important; }
+
+/* 边框 */
+html.light .border-surface-border   { border-color: #dee2e6 !important; }
+
+/* 文字 — 主文字变深 */
+html.light .text-white              { color: #212529 !important; }
+html.light .text-gray-100           { color: #212529 !important; }
+html.light .text-gray-200           { color: #343a40 !important; }
+html.light .text-gray-300           { color: #495057 !important; }
+html.light .text-gray-400           { color: #6c757d !important; }
+html.light .text-gray-500           { color: #868e96 !important; }
+html.light .text-gray-600           { color: #adb5bd !important; }
+
+/* 保持按钮/气泡内白色文字 */
+html.light .btn-primary             { color: #fff !important; }
+html.light .bubble-user             { color: #fff !important; }
+
+/* hover */
+html.light .hover\:bg-surface-hover:hover { background-color: #e9ecef !important; }
+html.light .hover\:text-white:hover { color: #212529 !important; }
+
+/* 滚动条 */
+html.light ::-webkit-scrollbar-thumb { background: #ced4da !important; }
+
+/* select */
+html.light select, html.light select option { background: #fff !important; color: #212529 !important; }
+
+/* Modal */
+html.light .bg-black\/60            { background-color: rgba(0,0,0,0.3) !important; }

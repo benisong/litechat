@@ -24,6 +24,7 @@ type ChatService struct {
 	messageStore   *store.MessageStore
 	characterStore *store.CharacterStore
 	presetStore    *store.PresetStore
+	worldBookStore *store.WorldBookStore
 	configStore    *store.ConfigStore
 }
 
@@ -32,6 +33,7 @@ func NewChatService(
 	messageStore *store.MessageStore,
 	characterStore *store.CharacterStore,
 	presetStore *store.PresetStore,
+	worldBookStore *store.WorldBookStore,
 	configStore *store.ConfigStore,
 ) *ChatService {
 	return &ChatService{
@@ -39,6 +41,7 @@ func NewChatService(
 		messageStore:   messageStore,
 		characterStore: characterStore,
 		presetStore:    presetStore,
+		worldBookStore: worldBookStore,
 		configStore:    configStore,
 	}
 }
@@ -47,15 +50,15 @@ func NewChatService(
 type StreamCallback func(token string) error
 
 // SendMessage 发送消息并流式返回 AI 响应
-func (s *ChatService) SendMessage(chatID, content, presetID string, callback StreamCallback) (string, error) {
+func (s *ChatService) SendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
 	// 获取对话信息
-	chat, err := s.chatStore.GetByID(chatID)
+	chat, err := s.chatStore.GetByID(chatID, userID)
 	if err != nil {
 		return "", fmt.Errorf("对话不存在: %w", err)
 	}
 
 	// 获取角色信息
-	character, err := s.characterStore.GetByID(chat.CharacterID)
+	character, err := s.characterStore.GetByID(chat.CharacterID, userID)
 	if err != nil {
 		return "", fmt.Errorf("角色不存在: %w", err)
 	}
@@ -68,13 +71,13 @@ func (s *ChatService) SendMessage(chatID, content, presetID string, callback Str
 
 	var preset *model.Preset
 	if presetIDToUse != "" {
-		preset, err = s.presetStore.GetByID(presetIDToUse)
+		preset, err = s.presetStore.GetByID(presetIDToUse, userID)
 		if err != nil {
 			preset = nil
 		}
 	}
 	if preset == nil {
-		preset, err = s.presetStore.GetDefault()
+		preset, err = s.presetStore.GetDefault(userID)
 		if err != nil {
 			// 使用内置默认预设
 			preset = &model.Preset{
@@ -103,7 +106,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID string, callback Str
 	}
 
 	// 构建消息列表（支持多段提示词注入）
-	messages := s.buildMessages(preset, character, history, content)
+	messages := s.buildMessages(preset, character, history, content, userID)
 
 	// 获取 API 配置
 	settings, err := s.configStore.GetSettings()
@@ -132,7 +135,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID string, callback Str
 	}
 
 	// 更新对话的 updated_at
-	_ = s.chatStore.Touch(chatID)
+	_ = s.chatStore.Touch(chatID, userID)
 
 	return fullResponse, nil
 }
@@ -240,7 +243,7 @@ var macroRegex = regexp.MustCompile(`\{\{[^}]+\}\}`)
 // buildMessages 构建完整的消息列表
 // 如果预设有多段 Prompts（高级模式），按 SillyTavern 格式注入
 // 否则回退到简单模式（单段 SystemPrompt）
-func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character, history []*model.Message, userContent string) []model.ChatCompletionMessage {
+func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character, history []*model.Message, userContent string, userID string) []model.ChatCompletionMessage {
 
 	// 1. 组装聊天历史（含开场白 + 历史 + 当前用户消息）
 	var chatHistory []model.ChatCompletionMessage
@@ -367,6 +370,10 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	}
 
 	messages = append(messages, result...)
+
+	// 6. 世界书注入：扫描聊天历史中的关键词，将匹配的条目注入
+	messages = s.injectWorldBookEntries(messages, chatHistory, char, userID)
+
 	return messages
 }
 
@@ -377,6 +384,177 @@ func sortEntries(entries []model.PromptEntry) {
 			entries[j], entries[j-1] = entries[j-1], entries[j]
 		}
 	}
+}
+
+// injectWorldBookEntries 扫描聊天历史，将关键词匹配的世界书条目注入到消息列表中
+func (s *ChatService) injectWorldBookEntries(messages []model.ChatCompletionMessage, chatHistory []model.ChatCompletionMessage, char *model.Character, userID string) []model.ChatCompletionMessage {
+	// 获取当前用户所有启用的世界书条目
+	allEntries, err := s.worldBookStore.ListAllEntries(userID)
+	if err != nil {
+		log.Printf("[世界书] 加载条目失败: %v", err)
+		return messages
+	}
+	if len(allEntries) == 0 {
+		return messages
+	}
+
+	// 筛选：常驻条目 + 关键词匹配的条目
+	var matched []model.WorldBookEntry
+	for _, entry := range allEntries {
+		if entry.Constant {
+			// 常驻条目，直接加入
+			matched = append(matched, entry)
+			continue
+		}
+		// 关键词扫描
+		if s.matchWorldBookEntry(&entry, chatHistory) {
+			matched = append(matched, entry)
+		}
+	}
+
+	if len(matched) == 0 {
+		return messages
+	}
+
+	log.Printf("[世界书] 匹配到 %d 个条目", len(matched))
+
+	// 按注入深度分组处理
+	msgLen := len(messages)
+
+	// 收集注入点（从后往前插入）
+	type wbInject struct {
+		pos int
+		msg model.ChatCompletionMessage
+	}
+	var injections []wbInject
+
+	for _, entry := range matched {
+		content := s.replaceVars(entry.Content, char)
+		role := entry.Role
+		if role == "" {
+			role = "system"
+		}
+
+		// 计算注入位置
+		var absPos int
+		if entry.InjectionDepth == 0 {
+			// depth=0: 在消息列表最前面（紧跟 system prompt 之后）
+			// 找到第一个非 system 消息的位置
+			absPos = 0
+			for i, m := range messages {
+				if m.Role != "system" {
+					absPos = i
+					break
+				}
+				absPos = i + 1
+			}
+		} else if entry.InjectionPos == 1 {
+			// 绝对位置
+			absPos = entry.InjectionDepth
+			if absPos > msgLen {
+				absPos = msgLen
+			}
+		} else {
+			// 相对末尾
+			absPos = msgLen - entry.InjectionDepth
+			if absPos < 0 {
+				absPos = 0
+			}
+		}
+
+		injections = append(injections, wbInject{
+			pos: absPos,
+			msg: model.ChatCompletionMessage{Role: role, Content: content},
+		})
+	}
+
+	// 按位置从大到小排序（从后往前插入不影响前面的索引）
+	for i := 0; i < len(injections); i++ {
+		for j := i + 1; j < len(injections); j++ {
+			if injections[j].pos > injections[i].pos {
+				injections[i], injections[j] = injections[j], injections[i]
+			}
+		}
+	}
+
+	result := make([]model.ChatCompletionMessage, len(messages))
+	copy(result, messages)
+
+	for _, inj := range injections {
+		pos := inj.pos
+		if pos > len(result) {
+			pos = len(result)
+		}
+		result = append(result[:pos], append([]model.ChatCompletionMessage{inj.msg}, result[pos:]...)...)
+	}
+
+	return result
+}
+
+// matchWorldBookEntry 检查聊天历史是否匹配世界书条目的关键词
+func (s *ChatService) matchWorldBookEntry(entry *model.WorldBookEntry, chatHistory []model.ChatCompletionMessage) bool {
+	if entry.Keys == "" {
+		return false
+	}
+
+	// 确定扫描范围
+	scanMsgs := chatHistory
+	if entry.ScanDepth > 0 && entry.ScanDepth < len(chatHistory) {
+		scanMsgs = chatHistory[len(chatHistory)-entry.ScanDepth:]
+	}
+
+	// 拼接扫描范围内的所有消息文本
+	var textBuilder strings.Builder
+	for _, msg := range scanMsgs {
+		textBuilder.WriteString(msg.Content)
+		textBuilder.WriteString(" ")
+	}
+	scanText := textBuilder.String()
+	if !entry.CaseSensitive {
+		scanText = strings.ToLower(scanText)
+	}
+
+	// 主关键词：逗号分隔，OR 逻辑（任一命中即可）
+	keys := strings.Split(entry.Keys, ",")
+	primaryMatch := false
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		checkKey := key
+		if !entry.CaseSensitive {
+			checkKey = strings.ToLower(key)
+		}
+		if strings.Contains(scanText, checkKey) {
+			primaryMatch = true
+			break
+		}
+	}
+
+	if !primaryMatch {
+		return false
+	}
+
+	// 次关键词：逗号分隔，AND 逻辑（全部都要命中）
+	if entry.SecondaryKeys != "" {
+		secKeys := strings.Split(entry.SecondaryKeys, ",")
+		for _, key := range secKeys {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			checkKey := key
+			if !entry.CaseSensitive {
+				checkKey = strings.ToLower(key)
+			}
+			if !strings.Contains(scanText, checkKey) {
+				return false // AND 逻辑，有一个没命中就不匹配
+			}
+		}
+	}
+
+	return true
 }
 
 // callOpenAIStream 调用 OpenAI 兼容 API 并流式返回

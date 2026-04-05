@@ -18,9 +18,23 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		AllowCredentials: false,
 	}))
 
-	// API 路由组
+	// 公开路由（不需要认证）
+	r.POST("/api/auth/login", h.Login)
+
+	// API 路由组（需要 JWT 认证）
 	api := r.Group("/api")
+	api.Use(JWTAuthMiddleware())
 	{
+		// 当前用户信息
+		api.GET("/auth/me", h.GetCurrentUser)
+		api.PUT("/auth/password", h.ChangePassword)
+
+		// 用户管理（仅管理员）
+		api.POST("/auth/users", AdminOnly(), h.CreateUser)
+		api.GET("/auth/users", AdminOnly(), h.ListUsers)
+		api.PUT("/auth/users/:id", AdminOnly(), h.UpdateUser)
+		api.DELETE("/auth/users/:id", AdminOnly(), h.DeleteUser)
+
 		// 角色卡
 		api.GET("/characters", h.ListCharacters)
 		api.POST("/characters", h.CreateCharacter)
@@ -56,12 +70,12 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.PUT("/worldbooks/entries/:entryId", h.UpdateWorldBookEntry)
 		api.DELETE("/worldbooks/entries/:entryId", h.DeleteWorldBookEntry)
 
-		// 设置
+		// 设置（仅管理员）
 		api.GET("/settings", h.GetSettings)
-		api.PUT("/settings", h.UpdateSettings)
+		api.PUT("/settings", AdminOnly(), h.UpdateSettings)
 
-		// 模型列表（从远端 API 获取）
-		api.GET("/models", h.FetchModels)
+		// 模型列表（仅管理员）
+		api.GET("/models", AdminOnly(), h.FetchModels)
 	}
 
 	return r

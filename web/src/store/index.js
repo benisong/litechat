@@ -4,18 +4,105 @@ import { persist } from 'zustand/middleware'
 // ===== API 工具函数 =====
 const BASE = '/api'
 
+// 从 zustand persist 读取 token
+function getToken() {
+  try {
+    const stored = localStorage.getItem('litechat-auth')
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      return parsed?.state?.token || null
+    }
+  } catch {}
+  return null
+}
+
 async function apiFetch(path, options = {}) {
+  const token = getToken()
+  const headers = { 'Content-Type': 'application/json', ...options.headers }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers,
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   })
+
+  // 401 未认证 → 静默抛出错误，由调用方处理
+  // 不做硬刷新，避免无限循环；路由守卫会在 token 清除后自动跳转登录页
+  if (res.status === 401) {
+    localStorage.removeItem('litechat-auth')
+    throw new Error('未授权，请重新登录')
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: '请求失败' }))
     throw new Error(err.error || '请求失败')
   }
   return res.json()
 }
+
+// ===== 认证 Store =====
+export const useAuthStore = create(
+  persist(
+    (set, get) => ({
+      user: null,
+      token: null,
+
+      login: async (username, password) => {
+        const res = await fetch(`${BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: '登录失败' }))
+          throw new Error(err.error || '登录失败')
+        }
+        const data = await res.json()
+        set({ user: data.user, token: data.token })
+        return data
+      },
+
+      logout: () => {
+        set({ user: null, token: null })
+      },
+
+      isLoggedIn: () => !!get().token,
+      isAdmin: () => get().user?.role === 'admin',
+    }),
+    {
+      name: 'litechat-auth',
+      partialize: (state) => ({ user: state.user, token: state.token }),
+    }
+  )
+)
+
+// ===== 用户管理 Store（管理员）=====
+export const useUserStore = create((set) => ({
+  users: [],
+  fetchUsers: async () => {
+    const data = await apiFetch('/auth/users')
+    set({ users: data || [] })
+  },
+  createUser: async (username, password, role = 'user') => {
+    const data = await apiFetch('/auth/users', {
+      method: 'POST', body: { username, password, role },
+    })
+    set(s => ({ users: [...s.users, data] }))
+    return data
+  },
+  deleteUser: async (id) => {
+    await apiFetch(`/auth/users/${id}`, { method: 'DELETE' })
+    set(s => ({ users: s.users.filter(u => u.id !== id) }))
+  },
+  changePassword: async (old_password, new_password) => {
+    await apiFetch('/auth/password', {
+      method: 'PUT', body: { old_password, new_password },
+    })
+  },
+}))
 
 // ===== 角色卡 Store =====
 export const useCharacterStore = create((set, get) => ({
@@ -109,9 +196,13 @@ export const useChatStore = create((set, get) => ({
     set(s => ({ messages: [...s.messages, aiMsgPlaceholder] }))
 
     try {
+      const sseHeaders = { 'Content-Type': 'application/json' }
+      const sseToken = getToken()
+      if (sseToken) sseHeaders['Authorization'] = `Bearer ${sseToken}`
+
       const res = await fetch(`${BASE}/chats/${chatId}/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: sseHeaders,
         body: JSON.stringify({ content, preset_id: presetId || '' }),
       })
 
@@ -293,7 +384,15 @@ export const useSettingsStore = create(
       fetchSettings: async () => {
         try {
           const data = await apiFetch('/settings')
+          // 主题用本地存储的值，不被后端覆盖
+          const localTheme = localStorage.getItem('litechat-theme')
+          if (localTheme) data.theme = localTheme
           set({ settings: data, loaded: true })
+          // 同步主题到 DOM
+          const theme = data.theme || 'dark'
+          document.documentElement.className = theme
+          const meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.content = theme === 'light' ? '#f8f9fa' : '#0f0f0f'
         } catch {}
       },
 
@@ -305,6 +404,10 @@ export const useSettingsStore = create(
       setTheme: (theme) => {
         set(s => ({ settings: { ...s.settings, theme } }))
         document.documentElement.className = theme
+        // 存到 localStorage（所有用户都能保存自己的主题偏好）
+        localStorage.setItem('litechat-theme', theme)
+        const meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.content = theme === 'light' ? '#f8f9fa' : '#0f0f0f'
       },
     }),
     {

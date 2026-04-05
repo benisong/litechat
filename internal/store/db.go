@@ -39,9 +39,20 @@ func NewDB(dataDir string) (*DB, error) {
 // InitSchema 初始化数据库表结构
 func (db *DB) InitSchema() error {
 	schema := `
+	-- 用户表
+	CREATE TABLE IF NOT EXISTS users (
+		id            TEXT PRIMARY KEY,
+		username      TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role          TEXT NOT NULL DEFAULT 'user',
+		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	-- 角色卡表
 	CREATE TABLE IF NOT EXISTS characters (
 		id          TEXT PRIMARY KEY,
+		user_id     TEXT DEFAULT '',
 		name        TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		personality TEXT DEFAULT '',
@@ -56,6 +67,7 @@ func (db *DB) InitSchema() error {
 	-- 预设表
 	CREATE TABLE IF NOT EXISTS presets (
 		id            TEXT PRIMARY KEY,
+		user_id       TEXT DEFAULT '',
 		name          TEXT NOT NULL,
 		system_prompt TEXT DEFAULT '',
 		prompts       TEXT DEFAULT '',
@@ -70,6 +82,7 @@ func (db *DB) InitSchema() error {
 	-- 世界书表
 	CREATE TABLE IF NOT EXISTS world_books (
 		id          TEXT PRIMARY KEY,
+		user_id     TEXT DEFAULT '',
 		name        TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -78,19 +91,29 @@ func (db *DB) InitSchema() error {
 
 	-- 世界书条目表
 	CREATE TABLE IF NOT EXISTS world_book_entries (
-		id            TEXT PRIMARY KEY,
-		world_book_id TEXT NOT NULL REFERENCES world_books(id) ON DELETE CASCADE,
-		keys          TEXT DEFAULT '',
-		content       TEXT DEFAULT '',
-		enabled       INTEGER DEFAULT 1,
-		priority      INTEGER DEFAULT 0,
-		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+		id                 TEXT PRIMARY KEY,
+		user_id            TEXT DEFAULT '',
+		world_book_id      TEXT NOT NULL REFERENCES world_books(id) ON DELETE CASCADE,
+		keys               TEXT DEFAULT '',
+		secondary_keys     TEXT DEFAULT '',
+		content            TEXT DEFAULT '',
+		enabled            INTEGER DEFAULT 1,
+		constant           INTEGER DEFAULT 0,
+		priority           INTEGER DEFAULT 0,
+		injection_position INTEGER DEFAULT 0,
+		injection_depth    INTEGER DEFAULT 4,
+		scan_depth         INTEGER DEFAULT 0,
+		case_sensitive     INTEGER DEFAULT 0,
+		order_num          INTEGER DEFAULT 100,
+		role               TEXT DEFAULT 'system',
+		created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	-- 对话会话表
 	CREATE TABLE IF NOT EXISTS chats (
 		id           TEXT PRIMARY KEY,
+		user_id      TEXT DEFAULT '',
 		character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
 		title        TEXT NOT NULL,
 		preset_id    TEXT DEFAULT '',
@@ -115,10 +138,11 @@ func (db *DB) InitSchema() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
-	-- 插入默认预设
-	INSERT OR IGNORE INTO presets (id, name, system_prompt, temperature, max_tokens, top_p, is_default)
+	-- 插入默认预设（user_id 为空，迁移时分配给管理员）
+	INSERT OR IGNORE INTO presets (id, user_id, name, system_prompt, temperature, max_tokens, top_p, is_default)
 	VALUES (
 		'default',
+		'',
 		'默认预设',
 		'你是{{char}}。请根据角色设定进行扮演，保持角色一致性。\n\n角色描述：{{description}}\n\n性格：{{personality}}\n\n场景：{{scenario}}',
 		0.8,
@@ -132,6 +156,7 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('api_key', '');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
 	`
 
 	_, err := db.Exec(schema)
@@ -141,6 +166,21 @@ func (db *DB) InitSchema() error {
 
 	// 兼容旧数据库：添加新列（已存在则忽略）
 	db.Exec(`ALTER TABLE presets ADD COLUMN prompts TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN secondary_keys TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN constant INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN injection_position INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN injection_depth INTEGER DEFAULT 4`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN scan_depth INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN case_sensitive INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN order_num INTEGER DEFAULT 100`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
+
+	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
+	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE chats ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE presets ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_books ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN user_id TEXT DEFAULT ''`)
 
 	log.Println("数据库结构初始化完成")
 	return nil

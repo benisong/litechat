@@ -17,41 +17,42 @@ func NewChatStore(db *DB) *ChatStore {
 }
 
 // Create 创建对话
-func (s *ChatStore) Create(chat *model.Chat) error {
+func (s *ChatStore) Create(chat *model.Chat, userID string) error {
 	chat.ID = uuid.New().String()
+	chat.UserID = userID
 	chat.CreatedAt = time.Now()
 	chat.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO chats (id, character_id, title, preset_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		chat.ID, chat.CharacterID, chat.Title, chat.PresetID, chat.CreatedAt, chat.UpdatedAt,
+		INSERT INTO chats (id, user_id, character_id, title, preset_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		chat.ID, chat.UserID, chat.CharacterID, chat.Title, chat.PresetID, chat.CreatedAt, chat.UpdatedAt,
 	)
 	return err
 }
 
-// GetByID 按 ID 查询对话
-func (s *ChatStore) GetByID(id string) (*model.Chat, error) {
+// GetByID 按 ID 查询对话（限定用户）
+func (s *ChatStore) GetByID(id string, userID string) (*model.Chat, error) {
 	chat := &model.Chat{}
 	err := s.db.QueryRow(`
-		SELECT id, character_id, title, preset_id, created_at, updated_at
-		FROM chats WHERE id = ?`, id,
-	).Scan(&chat.ID, &chat.CharacterID, &chat.Title, &chat.PresetID, &chat.CreatedAt, &chat.UpdatedAt)
+		SELECT id, user_id, character_id, title, preset_id, created_at, updated_at
+		FROM chats WHERE id = ? AND user_id = ?`, id, userID,
+	).Scan(&chat.ID, &chat.UserID, &chat.CharacterID, &chat.Title, &chat.PresetID, &chat.CreatedAt, &chat.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return chat, nil
 }
 
-// ListByCharacter 查询某角色的所有对话
-func (s *ChatStore) ListByCharacter(characterID string) ([]*model.Chat, error) {
+// ListByCharacter 查询某角色的所有对话（限定用户）
+func (s *ChatStore) ListByCharacter(characterID string, userID string) ([]*model.Chat, error) {
 	rows, err := s.db.Query(`
-		SELECT c.id, c.character_id, c.title, c.preset_id, c.created_at, c.updated_at,
+		SELECT c.id, c.user_id, c.character_id, c.title, c.preset_id, c.created_at, c.updated_at,
 			   (SELECT content FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
 			   (SELECT COUNT(*) FROM messages WHERE chat_id = c.id) as msg_count
 		FROM chats c
-		WHERE c.character_id = ?
-		ORDER BY c.updated_at DESC`, characterID)
+		WHERE c.character_id = ? AND c.user_id = ?
+		ORDER BY c.updated_at DESC`, characterID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +62,7 @@ func (s *ChatStore) ListByCharacter(characterID string) ([]*model.Chat, error) {
 	for rows.Next() {
 		chat := &model.Chat{}
 		var lastMsg, msgCount interface{}
-		if err := rows.Scan(&chat.ID, &chat.CharacterID, &chat.Title, &chat.PresetID,
+		if err := rows.Scan(&chat.ID, &chat.UserID, &chat.CharacterID, &chat.Title, &chat.PresetID,
 			&chat.CreatedAt, &chat.UpdatedAt, &lastMsg, &msgCount); err != nil {
 			return nil, err
 		}
@@ -76,16 +77,17 @@ func (s *ChatStore) ListByCharacter(characterID string) ([]*model.Chat, error) {
 	return list, nil
 }
 
-// ListAll 查询所有对话（带角色信息）
-func (s *ChatStore) ListAll() ([]*model.Chat, error) {
+// ListAll 查询所有对话（带角色信息，限定用户）
+func (s *ChatStore) ListAll(userID string) ([]*model.Chat, error) {
 	rows, err := s.db.Query(`
-		SELECT c.id, c.character_id, c.title, c.preset_id, c.created_at, c.updated_at,
+		SELECT c.id, c.user_id, c.character_id, c.title, c.preset_id, c.created_at, c.updated_at,
 			   ch.name, ch.avatar_url,
 			   (SELECT content FROM messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
 			   (SELECT COUNT(*) FROM messages WHERE chat_id = c.id) as msg_count
 		FROM chats c
 		LEFT JOIN characters ch ON ch.id = c.character_id
-		ORDER BY c.updated_at DESC`)
+		WHERE c.user_id = ?
+		ORDER BY c.updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +98,7 @@ func (s *ChatStore) ListAll() ([]*model.Chat, error) {
 		chat := &model.Chat{}
 		char := &model.Character{}
 		var lastMsg, msgCount interface{}
-		if err := rows.Scan(&chat.ID, &chat.CharacterID, &chat.Title, &chat.PresetID,
+		if err := rows.Scan(&chat.ID, &chat.UserID, &chat.CharacterID, &chat.Title, &chat.PresetID,
 			&chat.CreatedAt, &chat.UpdatedAt,
 			&char.Name, &char.AvatarURL,
 			&lastMsg, &msgCount); err != nil {
@@ -114,22 +116,22 @@ func (s *ChatStore) ListAll() ([]*model.Chat, error) {
 	return list, nil
 }
 
-// Delete 删除对话（级联删除消息）
-func (s *ChatStore) Delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM chats WHERE id = ?`, id)
+// Delete 删除对话（级联删除消息，限定用户）
+func (s *ChatStore) Delete(id string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM chats WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
-// UpdateTitle 更新对话标题
-func (s *ChatStore) UpdateTitle(id, title string) error {
-	_, err := s.db.Exec(`UPDATE chats SET title=?, updated_at=? WHERE id=?`,
-		title, time.Now(), id)
+// UpdateTitle 更新对话标题（限定用户）
+func (s *ChatStore) UpdateTitle(id, title string, userID string) error {
+	_, err := s.db.Exec(`UPDATE chats SET title=?, updated_at=? WHERE id=? AND user_id=?`,
+		title, time.Now(), id, userID)
 	return err
 }
 
-// Touch 更新对话的 updated_at
-func (s *ChatStore) Touch(id string) error {
-	_, err := s.db.Exec(`UPDATE chats SET updated_at=? WHERE id=?`, time.Now(), id)
+// Touch 更新对话的 updated_at（限定用户）
+func (s *ChatStore) Touch(id string, userID string) error {
+	_, err := s.db.Exec(`UPDATE chats SET updated_at=? WHERE id=? AND user_id=?`, time.Now(), id, userID)
 	return err
 }
 

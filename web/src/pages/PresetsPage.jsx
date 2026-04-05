@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { Layers, Plus, Trash2, Edit2, Check, ChevronDown, ChevronUp,
          Upload, ToggleLeft, ToggleRight, GripVertical, Copy } from 'lucide-react'
-import { usePresetStore, useUIStore } from '../store'
+import { usePresetStore, useUIStore, useAuthStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
@@ -57,6 +57,7 @@ export default function PresetsPage() {
   const [entries, setEntries] = useState([]) // 高级模式的多段提示词
   const [expandedEntry, setExpandedEntry] = useState(null) // 展开编辑的条目 ID
   const fileInputRef = useRef(null)
+  const isAdmin = useAuthStore(s => s.user?.role === 'admin')
 
   useEffect(() => { fetchPresets() }, [])
 
@@ -317,14 +318,19 @@ export default function PresetsPage() {
                 高级模式
               </button>
             </div>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border
-                         border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors ml-auto"
-            >
-              <Upload size={12} /> 导入 ST
-            </button>
-            <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            {/* 仅管理员可导入 SillyTavern 预设 */}
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border
+                             border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors ml-auto"
+                >
+                  <Upload size={12} /> 导入 ST
+                </button>
+                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              </>
+            )}
           </div>
 
           {/* 简单模式 */}

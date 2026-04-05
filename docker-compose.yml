@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  litechat:
+    build: .
+    container_name: litechat
+    restart: unless-stopped
+    ports:
+      - "18000:8080"
+    volumes:
+      - litechat-data:/app/data
+    environment:
+      - PORT=8080
+      - DATA_DIR=/app/data
+      - GIN_MODE=release
+      - JWT_SECRET=change-me-to-a-random-string
+
+volumes:
+  litechat-data:

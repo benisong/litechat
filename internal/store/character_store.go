@@ -18,27 +18,28 @@ func NewCharacterStore(db *DB) *CharacterStore {
 }
 
 // Create 创建角色卡
-func (s *CharacterStore) Create(c *model.Character) error {
+func (s *CharacterStore) Create(c *model.Character, userID string) error {
 	c.ID = uuid.New().String()
+	c.UserID = userID
 	c.CreatedAt = time.Now()
 	c.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO characters (id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.Name, c.Description, c.Personality, c.Scenario,
+		INSERT INTO characters (id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.UserID, c.Name, c.Description, c.Personality, c.Scenario,
 		c.FirstMsg, c.AvatarURL, c.Tags, c.CreatedAt, c.UpdatedAt,
 	)
 	return err
 }
 
-// GetByID 按 ID 查询角色卡
-func (s *CharacterStore) GetByID(id string) (*model.Character, error) {
+// GetByID 按 ID 查询角色卡（限定用户）
+func (s *CharacterStore) GetByID(id string, userID string) (*model.Character, error) {
 	c := &model.Character{}
 	err := s.db.QueryRow(`
-		SELECT id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at
-		FROM characters WHERE id = ?`, id,
-	).Scan(&c.ID, &c.Name, &c.Description, &c.Personality, &c.Scenario,
+		SELECT id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at
+		FROM characters WHERE id = ? AND user_id = ?`, id, userID,
+	).Scan(&c.ID, &c.UserID, &c.Name, &c.Description, &c.Personality, &c.Scenario,
 		&c.FirstMsg, &c.AvatarURL, &c.Tags, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -46,11 +47,11 @@ func (s *CharacterStore) GetByID(id string) (*model.Character, error) {
 	return c, nil
 }
 
-// List 查询所有角色卡
-func (s *CharacterStore) List() ([]*model.Character, error) {
+// List 查询当前用户的所有角色卡
+func (s *CharacterStore) List(userID string) ([]*model.Character, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at
-		FROM characters ORDER BY updated_at DESC`)
+		SELECT id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at
+		FROM characters WHERE user_id = ? ORDER BY updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +60,7 @@ func (s *CharacterStore) List() ([]*model.Character, error) {
 	var list []*model.Character
 	for rows.Next() {
 		c := &model.Character{}
-		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Personality, &c.Scenario,
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.Description, &c.Personality, &c.Scenario,
 			&c.FirstMsg, &c.AvatarURL, &c.Tags, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -69,13 +70,13 @@ func (s *CharacterStore) List() ([]*model.Character, error) {
 }
 
 // Update 更新角色卡
-func (s *CharacterStore) Update(c *model.Character) error {
+func (s *CharacterStore) Update(c *model.Character, userID string) error {
 	c.UpdatedAt = time.Now()
 	result, err := s.db.Exec(`
 		UPDATE characters SET name=?, description=?, personality=?, scenario=?, first_msg=?, avatar_url=?, tags=?, updated_at=?
-		WHERE id=?`,
+		WHERE id=? AND user_id=?`,
 		c.Name, c.Description, c.Personality, c.Scenario,
-		c.FirstMsg, c.AvatarURL, c.Tags, c.UpdatedAt, c.ID,
+		c.FirstMsg, c.AvatarURL, c.Tags, c.UpdatedAt, c.ID, userID,
 	)
 	if err != nil {
 		return err
@@ -88,7 +89,7 @@ func (s *CharacterStore) Update(c *model.Character) error {
 }
 
 // Delete 删除角色卡
-func (s *CharacterStore) Delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM characters WHERE id = ?`, id)
+func (s *CharacterStore) Delete(id string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM characters WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }

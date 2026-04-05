@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"litechat/internal/auth"
 	"litechat/internal/model"
 	"litechat/internal/service"
 	"litechat/internal/store"
@@ -15,13 +16,14 @@ import (
 
 // Handlers 所有 API 处理器的集合
 type Handlers struct {
-	characterStore  *store.CharacterStore
-	chatStore       *store.ChatStore
-	messageStore    *store.MessageStore
-	presetStore     *store.PresetStore
-	worldBookStore  *store.WorldBookStore
-	configStore     *store.ConfigStore
-	chatService     *service.ChatService
+	characterStore *store.CharacterStore
+	chatStore      *store.ChatStore
+	messageStore   *store.MessageStore
+	presetStore    *store.PresetStore
+	worldBookStore *store.WorldBookStore
+	configStore    *store.ConfigStore
+	userStore      *store.UserStore
+	chatService    *service.ChatService
 }
 
 func NewHandlers(
@@ -31,6 +33,7 @@ func NewHandlers(
 	presetStore *store.PresetStore,
 	worldBookStore *store.WorldBookStore,
 	configStore *store.ConfigStore,
+	userStore *store.UserStore,
 	chatService *service.ChatService,
 ) *Handlers {
 	return &Handlers{
@@ -40,7 +43,225 @@ func NewHandlers(
 		presetStore:    presetStore,
 		worldBookStore: worldBookStore,
 		configStore:    configStore,
+		userStore:      userStore,
 		chatService:    chatService,
+	}
+}
+
+// ========== 认证 API ==========
+
+// Login POST /api/auth/login 用户登录
+func (h *Handlers) Login(c *gin.Context) {
+	var req model.LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 查找用户
+	user, err := h.userStore.GetByUsername(req.Username)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		return
+	}
+
+	// 验证密码
+	if !auth.VerifyPassword(user.PasswordHash, req.Password) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		return
+	}
+
+	// 生成 token
+	token, err := auth.GenerateToken(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成令牌失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.LoginResponse{
+		Token: token,
+		User:  *user,
+	})
+}
+
+// GetCurrentUser GET /api/auth/me 获取当前用户信息
+func (h *Handlers) GetCurrentUser(c *gin.Context) {
+	userID := GetUserID(c)
+	user, err := h.userStore.GetByID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+// CreateUser POST /api/auth/users 创建用户（管理员）
+func (h *Handlers) CreateUser(c *gin.Context) {
+	var req model.CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 检查用户名是否已存在
+	if _, err := h.userStore.GetByUsername(req.Username); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
+		return
+	}
+
+	// 哈希密码
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+		return
+	}
+
+	role := req.Role
+	if role == "" {
+		role = "user"
+	}
+
+	user := &model.User{
+		Username:     req.Username,
+		PasswordHash: hash,
+		Role:         role,
+	}
+
+	if err := h.userStore.Create(user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 为新用户创建默认角色卡
+	if role == "user" {
+		h.userStore.CreateDefaultCharacter(user.ID)
+	}
+
+	c.JSON(http.StatusCreated, user)
+}
+
+// ListUsers GET /api/auth/users 列出所有用户（管理员）
+func (h *Handlers) ListUsers(c *gin.Context) {
+	users, err := h.userStore.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if users == nil {
+		users = []*model.User{}
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+// DeleteUser DELETE /api/auth/users/:id 删除用户（管理员）
+func (h *Handlers) DeleteUser(c *gin.Context) {
+	targetID := c.Param("id")
+	currentUserID := GetUserID(c)
+
+	// 不允许删除自己
+	if targetID == currentUserID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能删除当前登录用户"})
+		return
+	}
+
+	if err := h.userStore.Delete(targetID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+// ChangePassword PUT /api/auth/password 修改密码
+func (h *Handlers) ChangePassword(c *gin.Context) {
+	var req model.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := GetUserID(c)
+	user, err := h.userStore.GetByID(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	// 验证旧密码
+	if !auth.VerifyPassword(user.PasswordHash, req.OldPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "旧密码错误"})
+		return
+	}
+
+	// 哈希新密码
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+		return
+	}
+
+	if err := h.userStore.UpdatePassword(userID, hash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "密码修改成功"})
+}
+
+// UpdateUser PUT /api/auth/users/:id 管理员编辑用户（用户名/密码/角色）
+func (h *Handlers) UpdateUser(c *gin.Context) {
+	targetID := c.Param("id")
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 获取目标用户
+	target, err := h.userStore.GetByID(targetID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	// 用户名
+	username := target.Username
+	if req.Username != "" {
+		username = req.Username
+	}
+
+	// 角色
+	role := target.Role
+	if req.Role != "" {
+		role = req.Role
+	}
+
+	// 密码（如果提供则更新）
+	var passwordHash string
+	if req.Password != "" {
+		hash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+			return
+		}
+		passwordHash = hash
+	}
+
+	if err := h.userStore.UpdateUser(targetID, username, role, passwordHash); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 返回更新后的用户
+	updated, _ := h.userStore.GetByID(targetID)
+	if updated != nil {
+		c.JSON(http.StatusOK, updated)
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 	}
 }
 
@@ -48,7 +269,8 @@ func NewHandlers(
 
 // ListCharacters GET /api/characters
 func (h *Handlers) ListCharacters(c *gin.Context) {
-	list, err := h.characterStore.List()
+	userID := GetUserID(c)
+	list, err := h.characterStore.List(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -61,7 +283,8 @@ func (h *Handlers) ListCharacters(c *gin.Context) {
 
 // GetCharacter GET /api/characters/:id
 func (h *Handlers) GetCharacter(c *gin.Context) {
-	char, err := h.characterStore.GetByID(c.Param("id"))
+	userID := GetUserID(c)
+	char, err := h.characterStore.GetByID(c.Param("id"), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "角色不存在"})
 		return
@@ -71,12 +294,13 @@ func (h *Handlers) GetCharacter(c *gin.Context) {
 
 // CreateCharacter POST /api/characters
 func (h *Handlers) CreateCharacter(c *gin.Context) {
+	userID := GetUserID(c)
 	var char model.Character
 	if err := c.ShouldBindJSON(&char); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.characterStore.Create(&char); err != nil {
+	if err := h.characterStore.Create(&char, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -85,13 +309,14 @@ func (h *Handlers) CreateCharacter(c *gin.Context) {
 
 // UpdateCharacter PUT /api/characters/:id
 func (h *Handlers) UpdateCharacter(c *gin.Context) {
+	userID := GetUserID(c)
 	var char model.Character
 	if err := c.ShouldBindJSON(&char); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	char.ID = c.Param("id")
-	if err := h.characterStore.Update(&char); err != nil {
+	if err := h.characterStore.Update(&char, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -100,7 +325,8 @@ func (h *Handlers) UpdateCharacter(c *gin.Context) {
 
 // DeleteCharacter DELETE /api/characters/:id
 func (h *Handlers) DeleteCharacter(c *gin.Context) {
-	if err := h.characterStore.Delete(c.Param("id")); err != nil {
+	userID := GetUserID(c)
+	if err := h.characterStore.Delete(c.Param("id"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -111,14 +337,15 @@ func (h *Handlers) DeleteCharacter(c *gin.Context) {
 
 // ListChats GET /api/chats
 func (h *Handlers) ListChats(c *gin.Context) {
+	userID := GetUserID(c)
 	characterID := c.Query("character_id")
 	var err error
 	var list []*model.Chat
 
 	if characterID != "" {
-		list, err = h.chatStore.ListByCharacter(characterID)
+		list, err = h.chatStore.ListByCharacter(characterID, userID)
 	} else {
-		list, err = h.chatStore.ListAll()
+		list, err = h.chatStore.ListAll(userID)
 	}
 
 	if err != nil {
@@ -133,12 +360,13 @@ func (h *Handlers) ListChats(c *gin.Context) {
 
 // CreateChat POST /api/chats
 func (h *Handlers) CreateChat(c *gin.Context) {
+	userID := GetUserID(c)
 	var chat model.Chat
 	if err := c.ShouldBindJSON(&chat); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.chatStore.Create(&chat); err != nil {
+	if err := h.chatStore.Create(&chat, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -147,7 +375,8 @@ func (h *Handlers) CreateChat(c *gin.Context) {
 
 // GetChat GET /api/chats/:id
 func (h *Handlers) GetChat(c *gin.Context) {
-	chat, err := h.chatStore.GetByID(c.Param("id"))
+	userID := GetUserID(c)
+	chat, err := h.chatStore.GetByID(c.Param("id"), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
 		return
@@ -157,7 +386,8 @@ func (h *Handlers) GetChat(c *gin.Context) {
 
 // DeleteChat DELETE /api/chats/:id
 func (h *Handlers) DeleteChat(c *gin.Context) {
-	if err := h.chatStore.Delete(c.Param("id")); err != nil {
+	userID := GetUserID(c)
+	if err := h.chatStore.Delete(c.Param("id"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -166,6 +396,14 @@ func (h *Handlers) DeleteChat(c *gin.Context) {
 
 // GetMessages GET /api/chats/:id/messages
 func (h *Handlers) GetMessages(c *gin.Context) {
+	userID := GetUserID(c)
+	// 先验证对话属于当前用户
+	_, err := h.chatStore.GetByID(c.Param("id"), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+
 	messages, err := h.messageStore.ListByChatID(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -179,6 +417,7 @@ func (h *Handlers) GetMessages(c *gin.Context) {
 
 // SendMessage POST /api/chats/:id/messages  (SSE 流式响应)
 func (h *Handlers) SendMessage(c *gin.Context) {
+	userID := GetUserID(c)
 	chatID := c.Param("id")
 
 	var req model.SendMessageRequest
@@ -211,7 +450,7 @@ func (h *Handlers) SendMessage(c *gin.Context) {
 		return nil
 	}
 
-	_, err := h.chatService.SendMessage(chatID, req.Content, req.PresetID, callback)
+	_, err := h.chatService.SendMessage(chatID, req.Content, req.PresetID, userID, callback)
 	if err != nil {
 		fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()
@@ -236,7 +475,8 @@ func (h *Handlers) DeleteMessage(c *gin.Context) {
 
 // ListPresets GET /api/presets
 func (h *Handlers) ListPresets(c *gin.Context) {
-	list, err := h.presetStore.List()
+	userID := GetUserID(c)
+	list, err := h.presetStore.List(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -249,7 +489,8 @@ func (h *Handlers) ListPresets(c *gin.Context) {
 
 // GetPreset GET /api/presets/:id
 func (h *Handlers) GetPreset(c *gin.Context) {
-	preset, err := h.presetStore.GetByID(c.Param("id"))
+	userID := GetUserID(c)
+	preset, err := h.presetStore.GetByID(c.Param("id"), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "预设不存在"})
 		return
@@ -259,12 +500,13 @@ func (h *Handlers) GetPreset(c *gin.Context) {
 
 // CreatePreset POST /api/presets
 func (h *Handlers) CreatePreset(c *gin.Context) {
+	userID := GetUserID(c)
 	var preset model.Preset
 	if err := c.ShouldBindJSON(&preset); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.presetStore.Create(&preset); err != nil {
+	if err := h.presetStore.Create(&preset, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -273,13 +515,14 @@ func (h *Handlers) CreatePreset(c *gin.Context) {
 
 // UpdatePreset PUT /api/presets/:id
 func (h *Handlers) UpdatePreset(c *gin.Context) {
+	userID := GetUserID(c)
 	var preset model.Preset
 	if err := c.ShouldBindJSON(&preset); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	preset.ID = c.Param("id")
-	if err := h.presetStore.Update(&preset); err != nil {
+	if err := h.presetStore.Update(&preset, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -288,7 +531,8 @@ func (h *Handlers) UpdatePreset(c *gin.Context) {
 
 // DeletePreset DELETE /api/presets/:id
 func (h *Handlers) DeletePreset(c *gin.Context) {
-	if err := h.presetStore.Delete(c.Param("id")); err != nil {
+	userID := GetUserID(c)
+	if err := h.presetStore.Delete(c.Param("id"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -299,7 +543,8 @@ func (h *Handlers) DeletePreset(c *gin.Context) {
 
 // ListWorldBooks GET /api/worldbooks
 func (h *Handlers) ListWorldBooks(c *gin.Context) {
-	list, err := h.worldBookStore.List()
+	userID := GetUserID(c)
+	list, err := h.worldBookStore.List(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -312,7 +557,8 @@ func (h *Handlers) ListWorldBooks(c *gin.Context) {
 
 // GetWorldBook GET /api/worldbooks/:id
 func (h *Handlers) GetWorldBook(c *gin.Context) {
-	wb, err := h.worldBookStore.GetByID(c.Param("id"))
+	userID := GetUserID(c)
+	wb, err := h.worldBookStore.GetByID(c.Param("id"), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "世界书不存在"})
 		return
@@ -322,12 +568,13 @@ func (h *Handlers) GetWorldBook(c *gin.Context) {
 
 // CreateWorldBook POST /api/worldbooks
 func (h *Handlers) CreateWorldBook(c *gin.Context) {
+	userID := GetUserID(c)
 	var wb model.WorldBook
 	if err := c.ShouldBindJSON(&wb); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.worldBookStore.Create(&wb); err != nil {
+	if err := h.worldBookStore.Create(&wb, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -336,13 +583,14 @@ func (h *Handlers) CreateWorldBook(c *gin.Context) {
 
 // UpdateWorldBook PUT /api/worldbooks/:id
 func (h *Handlers) UpdateWorldBook(c *gin.Context) {
+	userID := GetUserID(c)
 	var wb model.WorldBook
 	if err := c.ShouldBindJSON(&wb); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	wb.ID = c.Param("id")
-	if err := h.worldBookStore.Update(&wb); err != nil {
+	if err := h.worldBookStore.Update(&wb, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -351,7 +599,8 @@ func (h *Handlers) UpdateWorldBook(c *gin.Context) {
 
 // DeleteWorldBook DELETE /api/worldbooks/:id
 func (h *Handlers) DeleteWorldBook(c *gin.Context) {
-	if err := h.worldBookStore.Delete(c.Param("id")); err != nil {
+	userID := GetUserID(c)
+	if err := h.worldBookStore.Delete(c.Param("id"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -360,13 +609,14 @@ func (h *Handlers) DeleteWorldBook(c *gin.Context) {
 
 // CreateWorldBookEntry POST /api/worldbooks/:id/entries
 func (h *Handlers) CreateWorldBookEntry(c *gin.Context) {
+	userID := GetUserID(c)
 	var entry model.WorldBookEntry
 	if err := c.ShouldBindJSON(&entry); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	entry.WorldBookID = c.Param("id")
-	if err := h.worldBookStore.CreateEntry(&entry); err != nil {
+	if err := h.worldBookStore.CreateEntry(&entry, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -375,13 +625,14 @@ func (h *Handlers) CreateWorldBookEntry(c *gin.Context) {
 
 // UpdateWorldBookEntry PUT /api/worldbooks/entries/:entryId
 func (h *Handlers) UpdateWorldBookEntry(c *gin.Context) {
+	userID := GetUserID(c)
 	var entry model.WorldBookEntry
 	if err := c.ShouldBindJSON(&entry); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	entry.ID = c.Param("entryId")
-	if err := h.worldBookStore.UpdateEntry(&entry); err != nil {
+	if err := h.worldBookStore.UpdateEntry(&entry, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -390,7 +641,8 @@ func (h *Handlers) UpdateWorldBookEntry(c *gin.Context) {
 
 // DeleteWorldBookEntry DELETE /api/worldbooks/entries/:entryId
 func (h *Handlers) DeleteWorldBookEntry(c *gin.Context) {
-	if err := h.worldBookStore.DeleteEntry(c.Param("entryId")); err != nil {
+	userID := GetUserID(c)
+	if err := h.worldBookStore.DeleteEntry(c.Param("entryId"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -434,6 +686,9 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	}
 	if settings.Theme != "" {
 		h.configStore.Set("theme", settings.Theme)
+	}
+	if settings.ServiceMode != "" {
+		h.configStore.Set("service_mode", settings.ServiceMode)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})

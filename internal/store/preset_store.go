@@ -17,27 +17,28 @@ func NewPresetStore(db *DB) *PresetStore {
 	return &PresetStore{db: db}
 }
 
-func (s *PresetStore) Create(p *model.Preset) error {
+func (s *PresetStore) Create(p *model.Preset, userID string) error {
 	p.ID = uuid.New().String()
+	p.UserID = userID
 	p.CreatedAt = time.Now()
 	p.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO presets (id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.SystemPrompt, p.Prompts, p.Temperature, p.MaxTokens, p.TopP,
+		INSERT INTO presets (id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.UserID, p.Name, p.SystemPrompt, p.Prompts, p.Temperature, p.MaxTokens, p.TopP,
 		boolToInt(p.IsDefault), p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
 
-func (s *PresetStore) GetByID(id string) (*model.Preset, error) {
+func (s *PresetStore) GetByID(id string, userID string) (*model.Preset, error) {
 	p := &model.Preset{}
 	var isDefault int
 	err := s.db.QueryRow(`
-		SELECT id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
-		FROM presets WHERE id = ?`, id,
-	).Scan(&p.ID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+		FROM presets WHERE id = ? AND user_id = ?`, id, userID,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -46,13 +47,13 @@ func (s *PresetStore) GetByID(id string) (*model.Preset, error) {
 	return p, nil
 }
 
-func (s *PresetStore) GetDefault() (*model.Preset, error) {
+func (s *PresetStore) GetDefault(userID string) (*model.Preset, error) {
 	p := &model.Preset{}
 	var isDefault int
 	err := s.db.QueryRow(`
-		SELECT id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
-		FROM presets WHERE is_default = 1 LIMIT 1`,
-	).Scan(&p.ID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+		FROM presets WHERE is_default = 1 AND user_id = ? LIMIT 1`, userID,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -61,10 +62,10 @@ func (s *PresetStore) GetDefault() (*model.Preset, error) {
 	return p, nil
 }
 
-func (s *PresetStore) List() ([]*model.Preset, error) {
+func (s *PresetStore) List(userID string) ([]*model.Preset, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
-		FROM presets ORDER BY is_default DESC, updated_at DESC`)
+		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+		FROM presets WHERE user_id = ? ORDER BY is_default DESC, updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func (s *PresetStore) List() ([]*model.Preset, error) {
 	for rows.Next() {
 		p := &model.Preset{}
 		var isDefault int
-		if err := rows.Scan(&p.ID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens,
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens,
 			&p.TopP, &isDefault, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -84,13 +85,13 @@ func (s *PresetStore) List() ([]*model.Preset, error) {
 	return list, nil
 }
 
-func (s *PresetStore) Update(p *model.Preset) error {
+func (s *PresetStore) Update(p *model.Preset, userID string) error {
 	p.UpdatedAt = time.Now()
 	result, err := s.db.Exec(`
 		UPDATE presets SET name=?, system_prompt=?, prompts=?, temperature=?, max_tokens=?, top_p=?, is_default=?, updated_at=?
-		WHERE id=?`,
+		WHERE id=? AND user_id=?`,
 		p.Name, p.SystemPrompt, p.Prompts, p.Temperature, p.MaxTokens, p.TopP,
-		boolToInt(p.IsDefault), p.UpdatedAt, p.ID,
+		boolToInt(p.IsDefault), p.UpdatedAt, p.ID, userID,
 	)
 	if err != nil {
 		return err
@@ -102,8 +103,8 @@ func (s *PresetStore) Update(p *model.Preset) error {
 	return nil
 }
 
-func (s *PresetStore) Delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM presets WHERE id = ?`, id)
+func (s *PresetStore) Delete(id string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM presets WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
@@ -116,30 +117,31 @@ func NewWorldBookStore(db *DB) *WorldBookStore {
 	return &WorldBookStore{db: db}
 }
 
-func (s *WorldBookStore) Create(wb *model.WorldBook) error {
+func (s *WorldBookStore) Create(wb *model.WorldBook, userID string) error {
 	wb.ID = uuid.New().String()
+	wb.UserID = userID
 	wb.CreatedAt = time.Now()
 	wb.UpdatedAt = time.Now()
 
 	_, err := s.db.Exec(`
-		INSERT INTO world_books (id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		wb.ID, wb.Name, wb.Description, wb.CreatedAt, wb.UpdatedAt,
+		INSERT INTO world_books (id, user_id, name, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		wb.ID, wb.UserID, wb.Name, wb.Description, wb.CreatedAt, wb.UpdatedAt,
 	)
 	return err
 }
 
-func (s *WorldBookStore) GetByID(id string) (*model.WorldBook, error) {
+func (s *WorldBookStore) GetByID(id string, userID string) (*model.WorldBook, error) {
 	wb := &model.WorldBook{}
 	err := s.db.QueryRow(`
-		SELECT id, name, description, created_at, updated_at
-		FROM world_books WHERE id = ?`, id,
-	).Scan(&wb.ID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt)
+		SELECT id, user_id, name, description, created_at, updated_at
+		FROM world_books WHERE id = ? AND user_id = ?`, id, userID,
+	).Scan(&wb.ID, &wb.UserID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	// 加载条目
-	entries, err := s.ListEntries(id)
+	entries, err := s.ListEntries(id, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,10 +149,10 @@ func (s *WorldBookStore) GetByID(id string) (*model.WorldBook, error) {
 	return wb, nil
 }
 
-func (s *WorldBookStore) List() ([]*model.WorldBook, error) {
+func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, description, created_at, updated_at
-		FROM world_books ORDER BY updated_at DESC`)
+		SELECT id, user_id, name, description, created_at, updated_at
+		FROM world_books WHERE user_id = ? ORDER BY updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +161,7 @@ func (s *WorldBookStore) List() ([]*model.WorldBook, error) {
 	var list []*model.WorldBook
 	for rows.Next() {
 		wb := &model.WorldBook{}
-		if err := rows.Scan(&wb.ID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt); err != nil {
+		if err := rows.Scan(&wb.ID, &wb.UserID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, wb)
@@ -167,39 +169,50 @@ func (s *WorldBookStore) List() ([]*model.WorldBook, error) {
 	return list, nil
 }
 
-func (s *WorldBookStore) Update(wb *model.WorldBook) error {
+func (s *WorldBookStore) Update(wb *model.WorldBook, userID string) error {
 	wb.UpdatedAt = time.Now()
 	_, err := s.db.Exec(`
-		UPDATE world_books SET name=?, description=?, updated_at=? WHERE id=?`,
-		wb.Name, wb.Description, wb.UpdatedAt, wb.ID,
+		UPDATE world_books SET name=?, description=?, updated_at=? WHERE id=? AND user_id=?`,
+		wb.Name, wb.Description, wb.UpdatedAt, wb.ID, userID,
 	)
 	return err
 }
 
-func (s *WorldBookStore) Delete(id string) error {
-	_, err := s.db.Exec(`DELETE FROM world_books WHERE id = ?`, id)
+func (s *WorldBookStore) Delete(id string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM world_books WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
 // 世界书条目操作
-func (s *WorldBookStore) CreateEntry(e *model.WorldBookEntry) error {
+func (s *WorldBookStore) CreateEntry(e *model.WorldBookEntry, userID string) error {
 	e.ID = uuid.New().String()
+	e.UserID = userID
 	e.CreatedAt = time.Now()
 	e.UpdatedAt = time.Now()
+	if e.Role == "" {
+		e.Role = "system"
+	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO world_book_entries (id, world_book_id, keys, content, enabled, priority, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.WorldBookID, e.Keys, e.Content, boolToInt(e.Enabled), e.Priority, e.CreatedAt, e.UpdatedAt,
+		INSERT INTO world_book_entries
+			(id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
+			 injection_position, injection_depth, scan_depth, case_sensitive, order_num, role, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.UserID, e.WorldBookID, e.Keys, e.SecondaryKeys, e.Content,
+		boolToInt(e.Enabled), boolToInt(e.Constant), e.Priority,
+		e.InjectionPos, e.InjectionDepth, e.ScanDepth, boolToInt(e.CaseSensitive),
+		e.Order, e.Role, e.CreatedAt, e.UpdatedAt,
 	)
 	return err
 }
 
-func (s *WorldBookStore) ListEntries(worldBookID string) ([]model.WorldBookEntry, error) {
+func (s *WorldBookStore) ListEntries(worldBookID string, userID string) ([]model.WorldBookEntry, error) {
 	rows, err := s.db.Query(`
-		SELECT id, world_book_id, keys, content, enabled, priority, created_at, updated_at
-		FROM world_book_entries WHERE world_book_id = ?
-		ORDER BY priority DESC`, worldBookID)
+		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
+		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
+		       created_at, updated_at
+		FROM world_book_entries WHERE world_book_id = ? AND user_id = ?
+		ORDER BY priority DESC, order_num ASC`, worldBookID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -208,28 +221,71 @@ func (s *WorldBookStore) ListEntries(worldBookID string) ([]model.WorldBookEntry
 	var list []model.WorldBookEntry
 	for rows.Next() {
 		e := model.WorldBookEntry{}
-		var enabled int
-		if err := rows.Scan(&e.ID, &e.WorldBookID, &e.Keys, &e.Content, &enabled, &e.Priority, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		var enabled, constant, caseSensitive int
+		if err := rows.Scan(&e.ID, &e.UserID, &e.WorldBookID, &e.Keys, &e.SecondaryKeys, &e.Content,
+			&enabled, &constant, &e.Priority,
+			&e.InjectionPos, &e.InjectionDepth, &e.ScanDepth, &caseSensitive,
+			&e.Order, &e.Role, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		e.Enabled = enabled == 1
+		e.Constant = constant == 1
+		e.CaseSensitive = caseSensitive == 1
 		list = append(list, e)
 	}
 	return list, nil
 }
 
-func (s *WorldBookStore) UpdateEntry(e *model.WorldBookEntry) error {
+// ListAllEntries 查询当前用户所有世界书的全部启用条目（用于聊天时扫描）
+func (s *WorldBookStore) ListAllEntries(userID string) ([]model.WorldBookEntry, error) {
+	rows, err := s.db.Query(`
+		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
+		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
+		       created_at, updated_at
+		FROM world_book_entries WHERE enabled = 1 AND user_id = ?
+		ORDER BY priority DESC, order_num ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []model.WorldBookEntry
+	for rows.Next() {
+		e := model.WorldBookEntry{}
+		var enabled, constant, caseSensitive int
+		if err := rows.Scan(&e.ID, &e.UserID, &e.WorldBookID, &e.Keys, &e.SecondaryKeys, &e.Content,
+			&enabled, &constant, &e.Priority,
+			&e.InjectionPos, &e.InjectionDepth, &e.ScanDepth, &caseSensitive,
+			&e.Order, &e.Role, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		e.Enabled = enabled == 1
+		e.Constant = constant == 1
+		e.CaseSensitive = caseSensitive == 1
+		list = append(list, e)
+	}
+	return list, nil
+}
+
+func (s *WorldBookStore) UpdateEntry(e *model.WorldBookEntry, userID string) error {
 	e.UpdatedAt = time.Now()
+	if e.Role == "" {
+		e.Role = "system"
+	}
 	_, err := s.db.Exec(`
-		UPDATE world_book_entries SET keys=?, content=?, enabled=?, priority=?, updated_at=?
-		WHERE id=?`,
-		e.Keys, e.Content, boolToInt(e.Enabled), e.Priority, e.UpdatedAt, e.ID,
+		UPDATE world_book_entries SET keys=?, secondary_keys=?, content=?, enabled=?, constant=?,
+			priority=?, injection_position=?, injection_depth=?, scan_depth=?, case_sensitive=?,
+			order_num=?, role=?, updated_at=?
+		WHERE id=? AND user_id=?`,
+		e.Keys, e.SecondaryKeys, e.Content, boolToInt(e.Enabled), boolToInt(e.Constant),
+		e.Priority, e.InjectionPos, e.InjectionDepth, e.ScanDepth, boolToInt(e.CaseSensitive),
+		e.Order, e.Role, e.UpdatedAt, e.ID, userID,
 	)
 	return err
 }
 
-func (s *WorldBookStore) DeleteEntry(id string) error {
-	_, err := s.db.Exec(`DELETE FROM world_book_entries WHERE id = ?`, id)
+func (s *WorldBookStore) DeleteEntry(id string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM world_book_entries WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
@@ -279,6 +335,8 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			settings.DefaultModel = v
 		case "theme":
 			settings.Theme = v
+		case "service_mode":
+			settings.ServiceMode = v
 		}
 	}
 	return settings, nil
