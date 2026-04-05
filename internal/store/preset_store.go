@@ -35,24 +35,44 @@ func (s *PresetStore) Create(p *model.Preset, userID string) error {
 func (s *PresetStore) GetByID(id string, userID string) (*model.Preset, error) {
 	p := &model.Preset{}
 	var isDefault int
+	// 先查自己的，再查任意的（服务模式下普通用户需要读 admin 的预设）
 	err := s.db.QueryRow(`
 		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
 		FROM presets WHERE id = ? AND user_id = ?`, id, userID,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
-		return nil, err
+		// 回退：不限 user_id 查找（admin 创建的预设）
+		err = s.db.QueryRow(`
+			SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+			FROM presets WHERE id = ?`, id,
+		).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+			&isDefault, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
 	}
 	p.IsDefault = isDefault == 1
 	return p, nil
 }
 
 func (s *PresetStore) GetDefault(userID string) (*model.Preset, error) {
+	// 优先找自己的默认预设，找不到则找任何人的默认预设（服务模式下 admin 创建的）
 	p := &model.Preset{}
 	var isDefault int
 	err := s.db.QueryRow(`
 		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
 		FROM presets WHERE is_default = 1 AND user_id = ? LIMIT 1`, userID,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		&isDefault, &p.CreatedAt, &p.UpdatedAt)
+	if err == nil {
+		p.IsDefault = isDefault == 1
+		return p, nil
+	}
+	// 回退：查找任意默认预设（admin 创建的）
+	err = s.db.QueryRow(`
+		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+		FROM presets WHERE is_default = 1 LIMIT 1`,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
