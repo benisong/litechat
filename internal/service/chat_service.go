@@ -73,13 +73,14 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	if presetIDToUse != "" {
 		preset, err = s.presetStore.GetByID(presetIDToUse, userID)
 		if err != nil {
+			log.Printf("[预设] 按ID=%s查找失败: %v", presetIDToUse, err)
 			preset = nil
 		}
 	}
 	if preset == nil {
 		preset, err = s.presetStore.GetDefault(userID)
 		if err != nil {
-			// 使用内置默认预设
+			log.Printf("[预设] 查找默认预设失败: %v，使用内置预设", err)
 			preset = &model.Preset{
 				SystemPrompt: "你是{{char}}。请根据角色设定进行扮演。",
 				Temperature:  0.8,
@@ -88,6 +89,10 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 			}
 		}
 	}
+	// 调试：记录实际使用的预设
+	hasPrompts := preset.Prompts != ""
+	log.Printf("[预设] 使用预设: name=%s id=%s user=%s 多段=%v prompts长度=%d",
+		preset.Name, preset.ID, preset.UserID, hasPrompts, len(preset.Prompts))
 
 	// 获取历史消息
 	history, err := s.messageStore.ListByChatID(chatID)
@@ -107,6 +112,23 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 
 	// 构建消息列表（支持多段提示词注入）
 	messages := s.buildMessages(preset, character, history, content, userID)
+
+	// 调试：将发送给 API 的完整消息列表写入文件
+	if DebugEnabled {
+		var msgDebug strings.Builder
+		msgDebug.WriteString(fmt.Sprintf("=== 发送消息调试 %s ===\n预设: %s (ID: %s)\n消息数: %d\n\n",
+			time.Now().Format("15:04:05"), preset.Name, preset.ID, len(messages)))
+		for i, m := range messages {
+			content := m.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			msgDebug.WriteString(fmt.Sprintf("[%d] role=%s\n%s\n\n", i, m.Role, content))
+		}
+		debugFile := fmt.Sprintf("data/debug_messages_%d.txt", time.Now().UnixMilli())
+		os.WriteFile(debugFile, []byte(msgDebug.String()), 0644)
+		log.Printf("[调试] 消息列表已写入 %s (%d 条消息)", debugFile, len(messages))
+	}
 
 	// 获取 API 配置
 	settings, err := s.configStore.GetSettings()
@@ -274,6 +296,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	// 3. 简单模式：单段 SystemPrompt
 	if len(entries) == 0 {
 		systemPrompt := s.replaceVars(preset.SystemPrompt, char)
+		log.Printf("[消息组装] 简单模式，system_prompt 长度=%d", len(systemPrompt))
 		messages := []model.ChatCompletionMessage{
 			{Role: "system", Content: systemPrompt},
 		}
@@ -281,7 +304,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	}
 
 	// 4. 高级模式：多段提示词注入
-	// 过滤启用的条目并做变量替换
+	log.Printf("[消息组装] 高级模式，共 %d 段提示词", len(entries))
 	var enabled []model.PromptEntry
 	for _, e := range entries {
 		if !e.Enabled {
