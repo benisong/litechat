@@ -69,10 +69,10 @@ func (s *PresetStore) GetDefault(userID string) (*model.Preset, error) {
 		p.IsDefault = isDefault == 1
 		return p, nil
 	}
-	// 回退：查找任意默认预设（admin 创建的）
+	// 回退：查找任意默认预设（优先有 user_id 的，即 admin 创建的）
 	err = s.db.QueryRow(`
 		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
-		FROM presets WHERE is_default = 1 LIMIT 1`,
+		FROM presets WHERE is_default = 1 AND user_id != '' ORDER BY updated_at DESC LIMIT 1`,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {

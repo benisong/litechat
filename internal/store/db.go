@@ -141,17 +141,23 @@ func (db *DB) InitSchema() error {
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
-	-- 插入默认预设（user_id 为空，迁移时分配给管理员）
+	-- 插入内置备用预设（is_default=0，不会被自动选中，仅作最终回退）
 	INSERT OR IGNORE INTO presets (id, user_id, name, system_prompt, temperature, max_tokens, top_p, is_default)
 	VALUES (
 		'default',
 		'',
-		'默认预设',
-		'你是{{char}}。请根据角色设定进行扮演，保持角色一致性。\n\n角色描述：{{description}}\n\n性格：{{personality}}\n\n场景：{{scenario}}',
+		'内置备用预设',
+		'你是{{char}}。请根据角色设定进行扮演，保持角色一致性。
+
+角色描述：{{description}}
+
+性格：{{personality}}
+
+场景：{{scenario}}',
 		0.8,
 		2048,
 		0.9,
-		1
+		0
 	);
 
 	-- 插入默认配置
