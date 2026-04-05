@@ -22,9 +22,18 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
-    // 加载对话信息
+    // 加载对话信息（带认证 header）
+    const getAuthHeaders = () => {
+      try {
+        const stored = localStorage.getItem('litechat-auth')
+        const token = stored ? JSON.parse(stored)?.state?.token : null
+        return token ? { 'Authorization': `Bearer ${token}` } : {}
+      } catch { return {} }
+    }
+
     const loadChat = async () => {
-      const res = await fetch(`/api/chats/${chatId}`)
+      const headers = getAuthHeaders()
+      const res = await fetch(`/api/chats/${chatId}`, { headers })
       if (!res.ok) { navigate('/chats'); return }
       const data = await res.json()
       setChat(data)
@@ -35,8 +44,7 @@ export default function ChatPage() {
       if (char) {
         setCharacter(char)
       } else {
-        // 从 API 获取
-        const r = await fetch(`/api/characters/${data.character_id}`)
+        const r = await fetch(`/api/characters/${data.character_id}`, { headers })
         if (r.ok) setCharacter(await r.json())
       }
     }

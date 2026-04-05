@@ -29,7 +29,9 @@ export default function CharacterEditPage() {
 
   useEffect(() => {
     if (!isNew) {
-      fetch(`/api/characters/${id}`)
+      const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {}
+      fetch(`/api/characters/${id}`, { headers })
         .then(r => r.json())
         .then(data => setForm(data))
         .catch(() => { showToast('加载失败', 'error'); navigate('/characters') })
