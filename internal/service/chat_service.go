@@ -312,6 +312,10 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		messages := []model.ChatCompletionMessage{
 			{Role: "system", Content: systemPrompt},
 		}
+		// 如果聊天历史第一条是 assistant（开场白），前面插入 user 消息
+		if len(chatHistory) > 0 && chatHistory[0].Role == "assistant" {
+			messages = append(messages, model.ChatCompletionMessage{Role: "user", Content: "[开始新对话]"})
+		}
 		return append(messages, chatHistory...)
 	}
 
@@ -389,6 +393,20 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		} else {
 			messages = append(messages, msg)
 		}
+	}
+
+	// Step F: Strict 模式兼容 — 确保第一条非 system 消息是 user
+	// 如果第一条非 system 是 assistant（开场白），在它前面插入一条 user 消息
+	for i := 0; i < len(messages); i++ {
+		if messages[i].Role == "system" {
+			continue
+		}
+		if messages[i].Role == "assistant" {
+			// 在 assistant 前插入 user 消息
+			userMsg := model.ChatCompletionMessage{Role: "user", Content: "[开始新对话]"}
+			messages = append(messages[:i], append([]model.ChatCompletionMessage{userMsg}, messages[i:]...)...)
+		}
+		break
 	}
 
 	log.Printf("[消息组装] 最终 %d 条消息（system_prompt=%d, after_history=%d, 历史=%d）",
