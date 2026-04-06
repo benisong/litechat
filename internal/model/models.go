@@ -57,16 +57,17 @@ type Preset struct {
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// PromptEntry 多段���示词中的单个条目（SillyTavern 兼容格式）
+// PromptEntry 多段提示词中的单个条目（SillyTavern 兼容格式）
 type PromptEntry struct {
 	ID             string `json:"id"`                       // 唯一标识
 	Name           string `json:"name"`                     // 显示名称
 	Content        string `json:"content"`                  // 提示词内容（支持 {{char}} 等变量）
 	Role           string `json:"role"`                     // system / user / assistant
 	Enabled        bool   `json:"enabled"`                  // 是否启用
+	SystemPrompt   bool   `json:"system_prompt"`            // true=合并到系统提示词区域，false=放在聊天历史之后
 	InjectionPos   int    `json:"injection_position"`       // 0=相对末尾(默认), 1=绝对位置
-	InjectionDepth int    `json:"injection_depth"`          // 注入深度（0=最前/最后）
-	Order          int    `json:"order"`                    // 同深度排序优先级
+	InjectionDepth int    `json:"injection_depth"`          // 注入深度
+	Order          int    `json:"order"`                    // 排序优先级
 }
 
 // WorldBook 世界书（知识库）

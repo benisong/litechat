@@ -135,11 +135,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		msgDebug.WriteString(fmt.Sprintf("=== 发送消息调试 %s ===\n预设: %s (ID: %s)\n消息数: %d\n\n",
 			time.Now().Format("15:04:05"), preset.Name, preset.ID, len(messages)))
 		for i, m := range messages {
-			content := m.Content
-			if len(content) > 200 {
-				content = content[:200] + "..."
-			}
-			msgDebug.WriteString(fmt.Sprintf("[%d] role=%s\n%s\n\n", i, m.Role, content))
+			msgDebug.WriteString(fmt.Sprintf("[%d] role=%s\n%s\n\n", i, m.Role, m.Content))
 		}
 		debugFile := fmt.Sprintf("data/debug_messages_%d.txt", time.Now().UnixMilli())
 		os.WriteFile(debugFile, []byte(msgDebug.String()), 0644)
@@ -319,7 +315,15 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		return append(messages, chatHistory...)
 	}
 
-	// 4. 高级模式：多段提示词注入
+	// 4. 高级模式（SillyTavern 兼容组装）
+	//
+	// ST 的实际行为（从日志逆向分析）：
+	//   Step A: system_prompt=true 的条目 → 按顺序合并为一条 system 消息（[0]）
+	//   Step B: 聊天历史（开场白 + 历史 + 用户消息）
+	//   Step C: system_prompt=false 的条目 → 按顺序追加到聊天历史之后
+	//   Step D: squash_system_messages — 非首条的 role=system 转为 role=user
+	//   Step E: 合并相邻同 role 消息
+	//
 	log.Printf("[消息组装] 高级模式，共 %d 段提示词", len(entries))
 	var enabled []model.PromptEntry
 	for _, e := range entries {
@@ -333,82 +337,60 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		enabled = append(enabled, e)
 	}
 
-	// 按 order 排序（稳定排序）
-	sortEntries(enabled)
-
-	// 分为两组：depth=0 的放在聊天历史前面，depth>0 的插入到历史中
-	var headEntries []model.PromptEntry  // 在聊天历史之前
-	var injectEntries []model.PromptEntry // 插入到聊天历史中
-
+	// Step A: system_prompt=true → 合并为系统消息块
+	var systemContent strings.Builder
 	for _, e := range enabled {
-		if e.InjectionDepth == 0 {
-			headEntries = append(headEntries, e)
-		} else {
-			injectEntries = append(injectEntries, e)
+		if !e.SystemPrompt {
+			continue
 		}
+		if systemContent.Len() > 0 {
+			systemContent.WriteString("\n")
+		}
+		systemContent.WriteString(e.Content)
 	}
 
-	// 5. 组装最终消息列表
-	// 先放 depth=0 的提示词
-	var messages []model.ChatCompletionMessage
-	for _, e := range headEntries {
-		messages = append(messages, model.ChatCompletionMessage{
+	var result []model.ChatCompletionMessage
+	if systemContent.Len() > 0 {
+		result = append(result, model.ChatCompletionMessage{
+			Role: "system", Content: systemContent.String(),
+		})
+	}
+
+	// Step B: 聊天历史
+	result = append(result, chatHistory...)
+
+	// Step C: system_prompt=false → 按顺序追加到聊天历史之后
+	for _, e := range enabled {
+		if e.SystemPrompt {
+			continue
+		}
+		result = append(result, model.ChatCompletionMessage{
 			Role: e.Role, Content: e.Content,
 		})
 	}
 
-	// 在聊天历史中注入 depth>0 的提示词
-	// injection_position=0（相对末尾）: depth=N 表示从末尾倒数第 N 条消息处插入
-	// injection_position=1（绝对位置）: depth=N 表示在第 N 条消息后插入
-	histLen := len(chatHistory)
-	// 为每个注入点计算绝对位置
-	type injection struct {
-		pos int
-		msg model.ChatCompletionMessage
+	// Step D: squash_system_messages — 第一条之后的 role=system 转为 role=user
+	for i := 1; i < len(result); i++ {
+		if result[i].Role == "system" {
+			result[i].Role = "user"
+		}
 	}
-	var injections []injection
 
-	for _, e := range injectEntries {
-		var absPos int
-		if e.InjectionPos == 1 {
-			// 绝对位置
-			absPos = e.InjectionDepth
+	// Step E: 合并相邻同 role 消息
+	var messages []model.ChatCompletionMessage
+	for _, msg := range result {
+		if len(messages) > 0 && messages[len(messages)-1].Role == msg.Role {
+			messages[len(messages)-1].Content += "\n" + msg.Content
 		} else {
-			// 相对末尾：depth=2 → 在倒数第 2 条消息前插入
-			absPos = histLen - e.InjectionDepth
-		}
-		if absPos < 0 {
-			absPos = 0
-		}
-		if absPos > histLen {
-			absPos = histLen
-		}
-		injections = append(injections, injection{
-			pos: absPos,
-			msg: model.ChatCompletionMessage{Role: e.Role, Content: e.Content},
-		})
-	}
-
-	// 按位置从大到小排序（从后往前插入不影响前面的索引）
-	for i := 0; i < len(injections); i++ {
-		for j := i + 1; j < len(injections); j++ {
-			if injections[j].pos > injections[i].pos {
-				injections[i], injections[j] = injections[j], injections[i]
-			}
+			messages = append(messages, msg)
 		}
 	}
 
-	// 复制聊天历史并插��
-	result := make([]model.ChatCompletionMessage, len(chatHistory))
-	copy(result, chatHistory)
-
-	for _, inj := range injections {
-		pos := inj.pos
-		// 在 pos 位置插入
-		result = append(result[:pos], append([]model.ChatCompletionMessage{inj.msg}, result[pos:]...)...)
-	}
-
-	messages = append(messages, result...)
+	log.Printf("[消息组装] 最终 %d 条消息（system_prompt=%d, after_history=%d, 历史=%d）",
+		len(messages),
+		func() int { c := 0; for _, e := range enabled { if e.SystemPrompt { c++ } }; return c }(),
+		func() int { c := 0; for _, e := range enabled { if !e.SystemPrompt { c++ } }; return c }(),
+		len(chatHistory))
 
 	// 6. 世界书注入：扫描聊天历史中的关键词，将匹配的条目注入
 	messages = s.injectWorldBookEntries(messages, chatHistory, char, userID)

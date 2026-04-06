@@ -156,20 +156,41 @@ export default function PresetsPage() {
       entries: [],
     }
 
+    // 构建 prompt_order 的 enabled 映射（ST 用 prompt_order 决定实际启用状态和顺序）
+    const orderMap = {} // identifier → { enabled, index }
+    if (Array.isArray(json.prompt_order)) {
+      // 取最后一个 character_id 的 order（通常是实际使用的）
+      const lastOrder = json.prompt_order[json.prompt_order.length - 1]
+      if (lastOrder?.order) {
+        lastOrder.order.forEach((item, idx) => {
+          orderMap[item.identifier] = { enabled: item.enabled !== false, index: idx }
+        })
+      }
+    }
+
     // SillyTavern 格式：prompts 数组
     if (Array.isArray(json.prompts)) {
       result.entries = json.prompts
-        .filter(p => p.prompt || p.content) // 跳过空条目
-        .map((p, i) => ({
-          id: p.identifier || p.id || `imported-${i}`,
-          name: p.name || p.display_name || `提示词 ${i + 1}`,
-          content: p.prompt || p.content || '',
-          role: p.role || 'system',
-          enabled: p.enabled !== false,
-          injection_position: p.injection_position ?? 0,
-          injection_depth: p.injection_depth ?? 0,
-          order: p.injection_order ?? (i * 10),
-        }))
+        .filter(p => (p.prompt || p.content) && !p.marker) // 跳过空条目和 marker
+        .map((p, i) => {
+          const id = p.identifier || p.id || `imported-${i}`
+          // 优先用 prompt_order 的 enabled 状态
+          const orderInfo = orderMap[id]
+          const enabled = orderInfo !== undefined ? orderInfo.enabled : (p.enabled !== false)
+          const sortIndex = orderInfo !== undefined ? orderInfo.index : i
+
+          return {
+            id,
+            name: p.name || p.display_name || `提示词 ${i + 1}`,
+            content: p.prompt || p.content || '',
+            role: p.role || 'system',
+            enabled,
+            system_prompt: p.system_prompt !== false,
+            injection_position: p.injection_position ?? 0,
+            injection_depth: p.injection_depth ?? 0,
+            order: p.injection_order ?? (sortIndex * 10),
+          }
+        })
     }
     // 兼容：如果没有 prompts 数组但有 system_prompt
     if (result.entries.length === 0 && json.system_prompt) {
