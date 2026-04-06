@@ -187,14 +187,11 @@ func (s *MessageStore) DeleteByID(id string) error {
 
 // DeleteFromID 删除指定消息及其之后的所有消息（级联删除）
 func (s *MessageStore) DeleteFromID(id string, chatID string) (int64, error) {
-	// 先获取该消息的创建时间
-	var createdAt string
-	err := s.db.QueryRow(`SELECT created_at FROM messages WHERE id = ? AND chat_id = ?`, id, chatID).Scan(&createdAt)
-	if err != nil {
-		return 0, err
-	}
-	// 删除该消息及之后的所有消息
-	result, err := s.db.Exec(`DELETE FROM messages WHERE chat_id = ? AND created_at >= ?`, chatID, createdAt)
+	// 用 rowid 找到该消息的位置，删除它及之后的所有消息
+	result, err := s.db.Exec(`
+		DELETE FROM messages WHERE chat_id = ? AND rowid >= (
+			SELECT rowid FROM messages WHERE id = ? AND chat_id = ?
+		)`, chatID, id, chatID)
 	if err != nil {
 		return 0, err
 	}

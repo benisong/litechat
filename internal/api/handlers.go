@@ -558,6 +558,21 @@ func (h *Handlers) RegenerateMessage(c *gin.Context) {
 	flusher.Flush()
 }
 
+// UpdateUserInfo PUT /api/settings/user-info 保存用户信息（所有用户可用）
+func (h *Handlers) UpdateUserInfo(c *gin.Context) {
+	var req struct {
+		DefaultUserName   string `json:"default_user_name"`
+		DefaultUserDetail string `json:"default_user_detail"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.configStore.Set("default_user_name", req.DefaultUserName)
+	h.configStore.Set("default_user_detail", req.DefaultUserDetail)
+	c.JSON(http.StatusOK, gin.H{"message": "用户信息已保存"})
+}
+
 // ========== 预设 API ==========
 
 // ListPresets GET /api/presets

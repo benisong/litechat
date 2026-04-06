@@ -12,6 +12,71 @@ const PRESET_ENDPOINTS = [
   { label: 'Groq', value: 'https://api.groq.com/openai/v1' },
 ]
 
+// 用户信息区域（走后端 API，所有用户可用）
+function UserInfoSection() {
+  const [userName, setUserName] = useState('')
+  const [userDetail, setUserDetail] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const { showToast } = useUIStore()
+
+  // 从后端加载
+  useEffect(() => {
+    const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
+    if (!token) return
+    fetch('/api/settings', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        setUserName(data.default_user_name || '')
+        setUserDetail(data.default_user_detail || '')
+        setLoaded(true)
+      }).catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    try {
+      const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
+      const res = await fetch('/api/settings/user-info', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ default_user_name: userName, default_user_detail: userDetail }),
+      })
+      if (!res.ok) throw new Error('保存失败')
+      showToast('用户信息已保存', 'success')
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-3 px-1">
+        用户信息
+      </h2>
+      <div className="card p-4 space-y-4">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5">默认用户名称</label>
+          <input className="w-full input-base text-sm"
+            value={userName}
+            onChange={e => setUserName(e.target.value)}
+            placeholder="输入用户名称" />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5">默认用户详情</label>
+          <textarea className="w-full input-base resize-none text-sm" rows={3}
+            value={userDetail}
+            onChange={e => setUserDetail(e.target.value)}
+            placeholder="用户的背景设定、性格特征等" />
+        </div>
+        <button onClick={handleSave}
+          className="w-full py-2.5 rounded-xl border border-primary-500/40 text-primary-300
+                     hover:bg-primary-500/10 transition-colors text-sm font-medium">
+          保存用户信息
+        </button>
+      </div>
+    </section>
+  )
+}
+
 export default function SettingsPage() {
   const { settings, fetchSettings, saveSettings, setTheme } = useSettingsStore()
   const { showToast } = useUIStore()
@@ -229,32 +294,8 @@ export default function SettingsPage() {
           </section>
         )}
 
-        {/* 用户信息（admin 始终可见；用户仅自用模式可见） */}
-        {showAPIConfig && (
-          <section>
-            <h2 className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-3 px-1">
-              用户信息
-            </h2>
-            <div className="card p-4 space-y-4">
-              {/* 默认用户名称 */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5">默认用户名称</label>
-                <input className="w-full input-base text-sm"
-                  value={form.default_user_name || ''}
-                  onChange={e => setForm(f => ({ ...f, default_user_name: e.target.value }))}
-                  placeholder="输入用户名称" />
-              </div>
-              {/* 默认用户详情 */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5">默认用户详情</label>
-                <textarea className="w-full input-base resize-none text-sm" rows={3}
-                  value={form.default_user_detail || ''}
-                  onChange={e => setForm(f => ({ ...f, default_user_detail: e.target.value }))}
-                  placeholder="用户的背景设定、性格特征等" />
-              </div>
-            </div>
-          </section>
-        )}
+        {/* 用户信息（所有用户可见，存 localStorage） */}
+        <UserInfoSection />
 
         {/* 外观 */}
         <section>
