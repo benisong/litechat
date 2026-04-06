@@ -354,6 +354,8 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 
 	var result []model.ChatCompletionMessage
 	if systemContent.Len() > 0 {
+		// 追加 [开始新对话] 分隔符（SillyTavern chatHistory marker）
+		systemContent.WriteString("\n\n[开始新对话]")
 		result = append(result, model.ChatCompletionMessage{
 			Role: "system", Content: systemContent.String(),
 		})
