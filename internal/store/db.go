@@ -53,17 +53,20 @@ func (db *DB) InitSchema() error {
 
 	-- 角色卡表
 	CREATE TABLE IF NOT EXISTS characters (
-		id          TEXT PRIMARY KEY,
-		user_id     TEXT DEFAULT '',
-		name        TEXT NOT NULL,
-		description TEXT DEFAULT '',
-		personality TEXT DEFAULT '',
-		scenario    TEXT DEFAULT '',
-		first_msg   TEXT DEFAULT '',
-		avatar_url  TEXT DEFAULT '',
-		tags        TEXT DEFAULT '',
-		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		id              TEXT PRIMARY KEY,
+		user_id         TEXT DEFAULT '',
+		name            TEXT NOT NULL,
+		description     TEXT DEFAULT '',
+		personality     TEXT DEFAULT '',
+		scenario        TEXT DEFAULT '',
+		first_msg       TEXT DEFAULT '',
+		avatar_url      TEXT DEFAULT '',
+		tags            TEXT DEFAULT '',
+		use_custom_user INTEGER DEFAULT 0,
+		user_name       TEXT DEFAULT '',
+		user_detail     TEXT DEFAULT '',
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	-- 预设表
@@ -166,6 +169,8 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_user_name', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_user_detail', '');
 	`
 
 	_, err := db.Exec(schema)
@@ -185,6 +190,9 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
+	db.Exec(`ALTER TABLE characters ADD COLUMN use_custom_user INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)

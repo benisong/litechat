@@ -777,6 +777,9 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	if settings.ServiceMode != "" {
 		h.configStore.Set("service_mode", settings.ServiceMode)
 	}
+	// 用户信息字段始终保存（允许清空）
+	h.configStore.Set("default_user_name", settings.DefaultUserName)
+	h.configStore.Set("default_user_detail", settings.DefaultUserDetail)
 
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})
 }

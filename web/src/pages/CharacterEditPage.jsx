@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft, Save, Upload, User } from 'lucide-react'
 import { useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
+import clsx from 'clsx'
 
 const FIELD_LABELS = {
   name:        { label: '角色名称 *', placeholder: '例如：爱丽丝', type: 'input' },
@@ -24,6 +25,7 @@ export default function CharacterEditPage() {
   const [form, setForm] = useState({
     name: '', description: '', personality: '',
     scenario: '', first_msg: '', avatar_url: '', tags: '',
+    use_custom_user: false, user_name: '', user_detail: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -117,6 +119,76 @@ export default function CharacterEditPage() {
             )}
           </div>
         ))}
+
+        {/* 用户角色信息 */}
+        <div>
+          {/* 开关 */}
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs text-gray-400 font-medium">设置用户角色信息</label>
+            <button
+              onClick={() => setForm(f => ({ ...f, use_custom_user: !f.use_custom_user }))}
+              className="flex-shrink-0"
+            >
+              {form.use_custom_user
+                ? <div className="w-10 h-5 rounded-full bg-primary-500 flex items-center justify-end px-0.5 transition-colors">
+                    <div className="w-4 h-4 rounded-full bg-white" />
+                  </div>
+                : <div className="w-10 h-5 rounded-full bg-gray-600 flex items-center justify-start px-0.5 transition-colors">
+                    <div className="w-4 h-4 rounded-full bg-white" />
+                  </div>
+              }
+            </button>
+          </div>
+
+          {/* 折叠/展开内容 */}
+          {!form.use_custom_user ? (
+            <p className="text-xs text-gray-500">使用全局默认用户信息</p>
+          ) : (
+            <div className="space-y-3 mt-2">
+              {/* 用户名称 + 默认按钮 */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户名称</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={form.user_name || ''}
+                    onChange={e => setForm(f => ({ ...f, user_name: e.target.value }))}
+                    placeholder="输入用户名称"
+                    className="flex-1 input-base"
+                  />
+                  <button
+                    onClick={async () => {
+                      // 从全局设置获取默认用户信息
+                      try {
+                        const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
+                        const headers = token ? { 'Authorization': `Bearer ${token}` } : {}
+                        const res = await fetch('/api/settings', { headers })
+                        const data = await res.json()
+                        if (data.default_user_name) {
+                          setForm(f => ({ ...f, user_name: data.default_user_name }))
+                        }
+                      } catch {}
+                    }}
+                    className="btn-ghost px-3 py-2 text-xs text-gray-400 hover:text-primary-300 border border-surface-border rounded-xl"
+                  >
+                    默认
+                  </button>
+                </div>
+              </div>
+              {/* 用户详情 */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户详情</label>
+                <textarea
+                  value={form.user_detail || ''}
+                  onChange={e => setForm(f => ({ ...f, user_detail: e.target.value }))}
+                  placeholder="用户的背景设定、性格特征等"
+                  rows={3}
+                  className="w-full input-base resize-none"
+                />
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* 提示 */}
         <div className="bg-surface/50 rounded-xl p-4 border border-surface-border">

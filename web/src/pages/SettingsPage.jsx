@@ -229,6 +229,33 @@ export default function SettingsPage() {
           </section>
         )}
 
+        {/* 用户信息（admin 始终可见；用户仅自用模式可见） */}
+        {showAPIConfig && (
+          <section>
+            <h2 className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-3 px-1">
+              用户信息
+            </h2>
+            <div className="card p-4 space-y-4">
+              {/* 默认用户名称 */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">默认用户名称</label>
+                <input className="w-full input-base text-sm"
+                  value={form.default_user_name || ''}
+                  onChange={e => setForm(f => ({ ...f, default_user_name: e.target.value }))}
+                  placeholder="输入用户名称" />
+              </div>
+              {/* 默认用户详情 */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">默认用户详情</label>
+                <textarea className="w-full input-base resize-none text-sm" rows={3}
+                  value={form.default_user_detail || ''}
+                  onChange={e => setForm(f => ({ ...f, default_user_detail: e.target.value }))}
+                  placeholder="用户的背景设定、性格特征等" />
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* 外观 */}
         <section>
           <h2 className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-3 px-1">外观</h2>

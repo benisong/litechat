@@ -4,17 +4,20 @@ import "time"
 
 // Character 角色卡模型
 type Character struct {
-	ID          string    `json:"id" db:"id"`
-	UserID      string    `json:"user_id" db:"user_id"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`   // 角色描述
-	Personality string    `json:"personality" db:"personality"`   // 性格设定
-	Scenario    string    `json:"scenario" db:"scenario"`         // 场景设定
-	FirstMsg    string    `json:"first_msg" db:"first_msg"`       // 开场白
-	AvatarURL   string    `json:"avatar_url" db:"avatar_url"`     // 头像URL
-	Tags        string    `json:"tags" db:"tags"`                 // 标签，逗号分隔
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID            string    `json:"id" db:"id"`
+	UserID        string    `json:"user_id" db:"user_id"`
+	Name          string    `json:"name" db:"name"`
+	Description   string    `json:"description" db:"description"`       // 角色描述
+	Personality   string    `json:"personality" db:"personality"`       // 性格设定
+	Scenario      string    `json:"scenario" db:"scenario"`             // 场景设定
+	FirstMsg      string    `json:"first_msg" db:"first_msg"`           // 开场白
+	AvatarURL     string    `json:"avatar_url" db:"avatar_url"`         // 头像URL
+	Tags          string    `json:"tags" db:"tags"`                     // 标签，逗号分隔
+	UseCustomUser bool      `json:"use_custom_user" db:"use_custom_user"` // 是否使用自定义用户信息
+	UserName      string    `json:"user_name" db:"user_name"`           // 自定义用户名称
+	UserDetail    string    `json:"user_detail" db:"user_detail"`       // 自定义用户详情
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // Chat 对话会话模型
@@ -114,11 +117,13 @@ type Config struct {
 
 // AppSettings 应用设置（聚合配置）
 type AppSettings struct {
-	APIEndpoint  string `json:"api_endpoint"`   // OpenAI 兼容 API 地址
-	APIKey       string `json:"api_key"`        // API 密钥
-	DefaultModel string `json:"default_model"`  // 默认模型
-	Theme        string `json:"theme"`          // light / dark
-	ServiceMode  string `json:"service_mode"`   // self=自用模式, service=服务模式
+	APIEndpoint     string `json:"api_endpoint"`      // OpenAI 兼容 API 地址
+	APIKey          string `json:"api_key"`           // API 密钥
+	DefaultModel    string `json:"default_model"`     // 默认模型
+	Theme           string `json:"theme"`             // light / dark
+	ServiceMode     string `json:"service_mode"`      // self=自用模式, service=服务模式
+	DefaultUserName string `json:"default_user_name"` // 默认用户名称
+	DefaultUserDetail string `json:"default_user_detail"` // 默认用户详情
 }
 
 // SendMessageRequest 发送消息请求

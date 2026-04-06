@@ -26,6 +26,7 @@ export default function WorldBooksPage() {
   const { characters, fetchCharacters } = useCharacterStore()
 
   const [view, setView] = useState('list')
+  const [showWarning, setShowWarning] = useState(false) // 新建前的警告弹窗
   const [showNewBook, setShowNewBook] = useState(false)
   const [newBookForm, setNewBookForm] = useState({ name: '', description: '', character_id: '' })
   const [showEntryEditor, setShowEntryEditor] = useState(false)
@@ -350,7 +351,14 @@ export default function WorldBooksPage() {
     <div className="flex flex-col h-full">
       <div className="px-4 pt-12 pb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">世界书</h1>
-        <button onClick={() => setShowNewBook(true)} className="btn-primary flex items-center gap-2 py-2 px-4 text-sm">
+        <button onClick={() => {
+          // 检查是否已确认过警告
+          if (localStorage.getItem('litechat-worldbook-warned')) {
+            setShowNewBook(true)
+          } else {
+            setShowWarning(true)
+          }
+        }} className="btn-primary flex items-center gap-2 py-2 px-4 text-sm">
           <Plus size={16} /> 新建
         </button>
       </div>
@@ -397,6 +405,40 @@ export default function WorldBooksPage() {
           </div>
         ))}
       </div>
+
+      {/* 新建前警告弹窗 */}
+      <Modal open={showWarning} onClose={() => setShowWarning(false)} title="">
+        <div className="flex flex-col items-center text-center space-y-4 py-2">
+          {/* 警告图标 */}
+          <div className="w-14 h-14 rounded-full bg-red-500/15 border border-red-500/30
+                          flex items-center justify-center">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          {/* 警告文本 */}
+          <p className="text-sm text-red-400 font-medium leading-relaxed px-2">
+            世界书属于高端玩法，不会的话不要盲目操作，容易造成不必要的错误
+          </p>
+          {/* 返回按钮（大、醒目） */}
+          <button
+            onClick={() => setShowWarning(false)}
+            className="w-full py-3.5 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300
+                       hover:bg-red-500/30 transition-colors font-medium text-base"
+          >
+            返回
+          </button>
+          {/* 确认按钮（小、低调） */}
+          <button
+            onClick={() => {
+              localStorage.setItem('litechat-worldbook-warned', '1')
+              setShowWarning(false)
+              setShowNewBook(true)
+            }}
+            className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+          >
+            确认并不再提示
+          </button>
+        </div>
+      </Modal>
 
       <Modal open={showNewBook} onClose={() => setShowNewBook(false)} title="新建世界书">
         <div className="space-y-4">

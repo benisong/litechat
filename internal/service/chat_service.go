@@ -296,16 +296,57 @@ func (s *ChatService) loadPreset(chatPresetID, requestPresetID, userID string) *
 }
 
 // replaceVars 替换提示词中的模板变量和 SillyTavern 宏
+// getUserName 获取用户名称（角色卡自定义 > 全局设置 > "User"）
+func (s *ChatService) getUserName(char *model.Character) string {
+	if char.UseCustomUser && char.UserName != "" {
+		return char.UserName
+	}
+	settings, err := s.configStore.GetSettings()
+	if err == nil && settings.DefaultUserName != "" {
+		return settings.DefaultUserName
+	}
+	return "User"
+}
+
+// getUserDetail 获取用户详情（角色卡自定义 > 全局设置）
+func (s *ChatService) getUserDetail(char *model.Character) string {
+	if char.UseCustomUser {
+		return char.UserDetail
+	}
+	settings, err := s.configStore.GetSettings()
+	if err == nil {
+		return settings.DefaultUserDetail
+	}
+	return ""
+}
+
 func (s *ChatService) replaceVars(template string, char *model.Character) string {
 	result := template
 
-	// 基础角色变量
+	// 用户变量
+	userName := s.getUserName(char)
+	result = strings.ReplaceAll(result, "{{user}}", userName)
+	result = strings.ReplaceAll(result, "{{User}}", userName)
+
+	// 角色变量
 	result = strings.ReplaceAll(result, "{{char}}", char.Name)
-	result = strings.ReplaceAll(result, "{{description}}", char.Description)
+
+	// {{description}} 前面拼接用户信息
+	userDetail := s.getUserDetail(char)
+	descWithUserInfo := char.Description
+	if userName != "" || userDetail != "" {
+		var userInfoBlock strings.Builder
+		userInfoBlock.WriteString("[用户信息]\n")
+		userInfoBlock.WriteString("用户名: " + userName + "\n")
+		if userDetail != "" {
+			userInfoBlock.WriteString("用户详情: " + userDetail + "\n")
+		}
+		userInfoBlock.WriteString("\n")
+		descWithUserInfo = userInfoBlock.String() + char.Description
+	}
+	result = strings.ReplaceAll(result, "{{description}}", descWithUserInfo)
 	result = strings.ReplaceAll(result, "{{personality}}", char.Personality)
 	result = strings.ReplaceAll(result, "{{scenario}}", char.Scenario)
-	result = strings.ReplaceAll(result, "{{user}}", "User")
-	result = strings.ReplaceAll(result, "{{User}}", "User")
 
 	// 时间日期变量
 	now := time.Now()
