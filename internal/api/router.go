@@ -48,7 +48,9 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.GET("/chats/:id", h.GetChat)
 		api.DELETE("/chats/:id", h.DeleteChat)
 		api.GET("/chats/:id/messages", h.GetMessages)
-		api.POST("/chats/:id/messages", h.SendMessage) // SSE 流式
+		api.POST("/chats/:id/messages", h.SendMessage)          // SSE 流式
+		api.POST("/chats/:id/regenerate", h.RegenerateMessage)   // 重新生成
+		api.DELETE("/chats/:id/messages/:msgId", h.DeleteMessageCascade) // 级联删除
 
 		// 消息
 		api.DELETE("/messages/:id", h.DeleteMessage)

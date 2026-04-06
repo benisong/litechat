@@ -274,6 +274,89 @@ export const useChatStore = create((set, get) => ({
     await apiFetch(`/messages/${id}`, { method: 'DELETE' })
     set(s => ({ messages: s.messages.filter(m => m.id !== id) }))
   },
+
+  // 级联删除：删除该消息及其后面的所有消息
+  deleteMessageCascade: async (chatId, msgId) => {
+    await apiFetch(`/chats/${chatId}/messages/${msgId}`, { method: 'DELETE' })
+    // 刷新消息列表
+    const data = await apiFetch(`/chats/${chatId}/messages`)
+    set({ messages: data || [] })
+  },
+
+  // 重新生成：后端删除最后一条 AI 回复并重新请求（不重复发送用户消息）
+  regenerate: async (chatId) => {
+    set(s => ({ streaming: true, streamContent: '' }))
+
+    // 先添加一个空的 AI 消息占位
+    const aiPlaceholder = {
+      id: 'temp-regen-' + Date.now(),
+      chat_id: chatId,
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+      isStreaming: true,
+    }
+    set(s => ({ messages: [...s.messages.filter(m => m.role !== 'assistant' || m !== s.messages[s.messages.length - 1]), aiPlaceholder] }))
+
+    try {
+      const sseHeaders = { 'Content-Type': 'application/json' }
+      const sseToken = getToken()
+      if (sseToken) sseHeaders['Authorization'] = `Bearer ${sseToken}`
+
+      const res = await fetch(`${BASE}/chats/${chatId}/regenerate`, {
+        method: 'POST',
+        headers: sseHeaders,
+      })
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let buffer = ''
+      let streamDone = false
+
+      while (!streamDone) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n')
+        buffer = parts.pop() || ''
+
+        for (const line of parts) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const data = trimmed.slice(5).trim()
+          if (!data) continue
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.done) { streamDone = true; break }
+            if (parsed.error) throw new Error(parsed.error)
+            if (parsed.token) {
+              fullContent += parsed.token
+              set(s => ({
+                messages: s.messages.map(m =>
+                  m.id === aiPlaceholder.id ? { ...m, content: fullContent } : m
+                ),
+                streamContent: fullContent,
+              }))
+            }
+          } catch (e) {
+            if (e.message && !e.message.includes('JSON')) throw e
+          }
+        }
+      }
+
+      // 刷新消息列表
+      const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
+      set({ messages: freshMessages || [], streaming: false, streamContent: '' })
+    } catch (err) {
+      set(s => ({
+        messages: s.messages.filter(m => m.id !== aiPlaceholder.id),
+        streaming: false,
+      }))
+      throw err
+    }
+  },
 }))
 
 // ===== 预设 Store =====

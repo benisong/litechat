@@ -499,6 +499,65 @@ func (h *Handlers) DeleteMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
+// DeleteMessageCascade DELETE /api/chats/:id/messages/:msgId 级联删除（该消息及之后的所有消息）
+func (h *Handlers) DeleteMessageCascade(c *gin.Context) {
+	chatID := c.Param("id")
+	msgID := c.Param("msgId")
+	userID := GetUserID(c)
+
+	// 验证对话属于当前用户
+	if _, err := h.chatStore.GetByID(chatID, userID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+
+	count, err := h.messageStore.DeleteFromID(msgID, chatID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("已删除 %d 条消息", count), "deleted": count})
+}
+
+// RegenerateMessage POST /api/chats/:id/regenerate 重新生成最后一条 AI 回复
+func (h *Handlers) RegenerateMessage(c *gin.Context) {
+	chatID := c.Param("id")
+	userID := GetUserID(c)
+
+	// 设置 SSE 头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "不支持流式响应"})
+		return
+	}
+
+	// 流式回调
+	callback := func(token string) error {
+		tokenBytes, _ := json.Marshal(map[string]string{"token": token})
+		_, err := fmt.Fprintf(c.Writer, "data: %s\n\n", string(tokenBytes))
+		if err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	_, err := h.chatService.Regenerate(chatID, userID, callback)
+	if err != nil {
+		fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
+		flusher.Flush()
+		return
+	}
+
+	fmt.Fprintf(c.Writer, "data: {\"done\":true}\n\n")
+	flusher.Flush()
+}
+
 // ========== 预设 API ==========
 
 // ListPresets GET /api/presets

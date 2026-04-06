@@ -12,7 +12,7 @@ export default function ChatPage() {
   const navigate = useNavigate()
   const { showToast } = useUIStore()
 
-  const { currentChat, messages, streaming, fetchMessages, sendMessage, deleteChat, deleteMessage } = useChatStore()
+  const { currentChat, messages, streaming, fetchMessages, sendMessage, deleteChat, deleteMessageCascade, regenerate } = useChatStore()
   const { characters } = useCharacterStore()
 
   const [chat, setChat] = useState(null)
@@ -66,28 +66,10 @@ export default function ChatPage() {
     }
   }
 
-  // 重新生成 AI 回复：删除该 AI 消息，找到上一条用户消息重新发送
-  const handleRegenerate = async (aiMessageId) => {
+  // 重新生成 AI 回复：后端自动读取上一条用户消息重新请求
+  const handleRegenerate = async () => {
     try {
-      // 找到这条 AI 消息在列表中的位置
-      const idx = messages.findIndex(m => m.id === aiMessageId)
-      if (idx < 0) return
-
-      // 往前找最近的用户消息
-      let userContent = ''
-      for (let i = idx - 1; i >= 0; i--) {
-        if (messages[i].role === 'user') {
-          userContent = messages[i].content
-          break
-        }
-      }
-      if (!userContent) { showToast('找不到对应的用户消息', 'error'); return }
-
-      // 删除 AI 消息
-      await deleteMessage(aiMessageId)
-
-      // 重新发送
-      await sendMessage(chatId, userContent)
+      await regenerate(chatId)
     } catch (err) {
       showToast(err.message || '重新生成失败', 'error')
     }
@@ -162,7 +144,8 @@ export default function ChatPage() {
             key={msg.id}
             message={msg}
             character={character}
-            onRegenerate={msg.role === 'assistant' ? () => handleRegenerate(msg.id) : undefined}
+            onRegenerate={msg.role === 'assistant' ? handleRegenerate : undefined}
+            onDeleteCascade={(msgId) => deleteMessageCascade(chatId, msgId)}
           />
         ))}
 

@@ -5,9 +5,8 @@ import MessageContent from './MessageContent'
 import { Trash2, Copy, Check, RefreshCw } from 'lucide-react'
 import { useChatStore } from '../../store'
 
-export default function MessageBubble({ message, character, onRegenerate }) {
+export default function MessageBubble({ message, character, onRegenerate, onDeleteCascade }) {
   const [copied, setCopied] = useState(false)
-  const { deleteMessage } = useChatStore()
 
   const isUser = message.role === 'user'
   const isStreaming = message.isStreaming
@@ -22,7 +21,12 @@ export default function MessageBubble({ message, character, onRegenerate }) {
 
   const handleDelete = async (e) => {
     e.stopPropagation()
-    if (!isTemp) await deleteMessage(message.id)
+    if (isTemp) return
+    if (onDeleteCascade) {
+      if (confirm('删除此消息及之后的所有消息？')) {
+        onDeleteCascade(message.id)
+      }
+    }
   }
 
   return (

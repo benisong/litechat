@@ -174,6 +174,127 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	return fullResponse, nil
 }
 
+// Regenerate 重新生成最后一条 AI 回复（删除旧回复，用已有历史重新请求）
+func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback) (string, error) {
+	// 获取对话的所有消息
+	allMessages, err := s.messageStore.ListByChatID(chatID)
+	if err != nil {
+		return "", fmt.Errorf("获取消息失败: %w", err)
+	}
+	if len(allMessages) == 0 {
+		return "", fmt.Errorf("没有消息可以重新生成")
+	}
+
+	// 找到最后一条 assistant 消息并删除
+	var lastAiIdx = -1
+	for i := len(allMessages) - 1; i >= 0; i-- {
+		if allMessages[i].Role == "assistant" {
+			lastAiIdx = i
+			break
+		}
+	}
+	if lastAiIdx < 0 {
+		return "", fmt.Errorf("没有 AI 回复可以重新生成")
+	}
+
+	// 删除最后一条 AI 回复
+	s.messageStore.DeleteByID(allMessages[lastAiIdx].ID)
+
+	// 找到最后一条用户消息的内容
+	var lastUserContent string
+	for i := lastAiIdx - 1; i >= 0; i-- {
+		if allMessages[i].Role == "user" {
+			lastUserContent = allMessages[i].Content
+			break
+		}
+	}
+	if lastUserContent == "" {
+		return "", fmt.Errorf("找不到对应的用户消息")
+	}
+
+	// 获取对话信息
+	chat, err := s.chatStore.GetByID(chatID, userID)
+	if err != nil {
+		return "", fmt.Errorf("对话不存在: %w", err)
+	}
+
+	// 获取角色信息
+	character, err := s.characterStore.GetByID(chat.CharacterID, userID)
+	if err != nil {
+		return "", fmt.Errorf("角色不存在: %w", err)
+	}
+
+	// 获取预设
+	preset := s.loadPreset(chat.PresetID, "", userID)
+
+	// 获取更新后的历史消息（不含已删除的 AI 回复，也不含最后的用户消息——因为 buildMessages 会自己加）
+	history, err := s.messageStore.ListByChatID(chatID)
+	if err != nil {
+		return "", fmt.Errorf("获取消息历史失败: %w", err)
+	}
+	// 去掉最后一条用户消息（buildMessages 会重新添加）
+	if len(history) > 0 && history[len(history)-1].Role == "user" {
+		history = history[:len(history)-1]
+	}
+
+	// 构建消息列表（不保存用户消息，直接用历史 + lastUserContent）
+	messages := s.buildMessages(preset, character, history, lastUserContent, userID)
+
+	// 获取 API 配置
+	settings, err := s.configStore.GetSettings()
+	if err != nil {
+		return "", fmt.Errorf("获取配置失败: %w", err)
+	}
+
+	// 调用 API
+	fullResponse, err := s.callOpenAIStream(settings, preset, messages, callback)
+	s.debugLogResponse(chatID, fullResponse, err)
+	if err != nil {
+		return "", err
+	}
+
+	// 保存新的 AI 响应
+	aiMsg := &model.Message{
+		ChatID:  chatID,
+		Role:    "assistant",
+		Content: fullResponse,
+	}
+	if err := s.messageStore.Create(aiMsg); err != nil {
+		return "", fmt.Errorf("保存 AI 消息失败: %w", err)
+	}
+
+	_ = s.chatStore.Touch(chatID, userID)
+	return fullResponse, nil
+}
+
+// loadPreset 加载预设（提取公共逻辑）
+func (s *ChatService) loadPreset(chatPresetID, requestPresetID, userID string) *model.Preset {
+	presetIDToUse := requestPresetID
+	if presetIDToUse == "" {
+		presetIDToUse = chatPresetID
+	}
+	var preset *model.Preset
+	var err error
+	if presetIDToUse != "" {
+		preset, err = s.presetStore.GetByID(presetIDToUse, userID)
+		if err != nil {
+			preset = nil
+		}
+	}
+	if preset == nil {
+		preset, err = s.presetStore.GetDefault(userID)
+		if err != nil {
+			preset = &model.Preset{
+				SystemPrompt: "你是{{char}}。请根据角色设定进行扮演。",
+				Temperature:  0.8,
+				MaxTokens:    2048,
+				TopP:         0.9,
+			}
+		}
+	}
+	return preset
+}
+
 // replaceVars 替换提示词中的模板变量和 SillyTavern 宏
 func (s *ChatService) replaceVars(template string, char *model.Character) string {
 	result := template
