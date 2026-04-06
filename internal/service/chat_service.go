@@ -26,6 +26,7 @@ type ChatService struct {
 	presetStore    *store.PresetStore
 	worldBookStore *store.WorldBookStore
 	configStore    *store.ConfigStore
+	userStore      *store.UserStore
 }
 
 func NewChatService(
@@ -35,6 +36,7 @@ func NewChatService(
 	presetStore *store.PresetStore,
 	worldBookStore *store.WorldBookStore,
 	configStore *store.ConfigStore,
+	userStore *store.UserStore,
 ) *ChatService {
 	return &ChatService{
 		chatStore:      chatStore,
@@ -43,6 +45,7 @@ func NewChatService(
 		presetStore:    presetStore,
 		worldBookStore: worldBookStore,
 		configStore:    configStore,
+		userStore:      userStore,
 	}
 }
 
@@ -69,6 +72,9 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		presetIDToUse = chat.PresetID
 	}
 
+	// 判断是否为服务模式
+	isServiceMode := s.userStore.GetCurrentMode() == "service"
+
 	var preset *model.Preset
 	if presetIDToUse != "" {
 		preset, err = s.presetStore.GetByID(presetIDToUse, userID)
@@ -78,9 +84,19 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		}
 	}
 	if preset == nil {
-		preset, err = s.presetStore.GetDefault(userID)
-		if err != nil {
-			log.Printf("[预设] 查找默认预设失败: %v，使用内置预设", err)
+		if isServiceMode {
+			// 服务模式：加载 admin 的默认预设（普通用户无自有预设）
+			preset, err = s.presetStore.GetDefaultAdmin()
+			if err != nil {
+				log.Printf("[预设] 服务模式查找admin预设失败: %v，使用内置预设", err)
+			}
+		} else {
+			preset, err = s.presetStore.GetDefault(userID)
+			if err != nil {
+				log.Printf("[预设] 查找默认预设失败: %v，使用内置预设", err)
+			}
+		}
+		if preset == nil {
 			preset = &model.Preset{
 				SystemPrompt: "你是{{char}}。请根据角色设定进行扮演。",
 				Temperature:  0.8,

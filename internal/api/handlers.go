@@ -378,6 +378,22 @@ func (h *Handlers) CreateChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 如果未指定预设，自动分配默认预设
+	if chat.PresetID == "" {
+		isServiceMode := h.userStore.GetCurrentMode() == "service"
+		var preset *model.Preset
+		var err error
+		if isServiceMode {
+			preset, err = h.presetStore.GetDefaultAdmin()
+		} else {
+			preset, err = h.presetStore.GetDefault(userID)
+		}
+		if err == nil && preset != nil {
+			chat.PresetID = preset.ID
+		}
+	}
+
 	if err := h.chatStore.Create(&chat, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

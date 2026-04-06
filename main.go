@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("创建初始用户失败: %v", err)
 	}
 
-	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore)
+	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore)
 
 	handlers := api.NewHandlers(
 		characterStore, chatStore, messageStore,

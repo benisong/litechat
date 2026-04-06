@@ -57,7 +57,7 @@ func (s *PresetStore) GetByID(id string, userID string) (*model.Preset, error) {
 }
 
 func (s *PresetStore) GetDefault(userID string) (*model.Preset, error) {
-	// 优先找自己的默认预设，找不到则找任何人的默认预设（服务模式下 admin 创建的）
+	// 优先找自己的默认预设
 	p := &model.Preset{}
 	var isDefault int
 	err := s.db.QueryRow(`
@@ -69,10 +69,54 @@ func (s *PresetStore) GetDefault(userID string) (*model.Preset, error) {
 		p.IsDefault = isDefault == 1
 		return p, nil
 	}
-	// 回退：查找任意默认预设（优先有 user_id 的，即 admin 创建的）
+	// 回退：查找任意用户的默认预设（服务模式下 admin 创建的）
 	err = s.db.QueryRow(`
 		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
 		FROM presets WHERE is_default = 1 AND user_id != '' ORDER BY updated_at DESC LIMIT 1`,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		&isDefault, &p.CreatedAt, &p.UpdatedAt)
+	if err == nil {
+		p.IsDefault = isDefault == 1
+		return p, nil
+	}
+	// 最终回退：没有标记为默认的预设，取任意预设（服务模式下 admin 可能忘记勾选默认）
+	err = s.db.QueryRow(`
+		SELECT id, user_id, name, system_prompt, prompts, temperature, max_tokens, top_p, is_default, created_at, updated_at
+		FROM presets WHERE user_id != '' ORDER BY updated_at DESC LIMIT 1`,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		&isDefault, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	p.IsDefault = isDefault == 1
+	return p, nil
+}
+
+// GetDefaultAdmin 服务模式专用：查找 admin 用户的预设
+// 优先找 admin 的默认预设，找不到则取 admin 的任意预设
+func (s *PresetStore) GetDefaultAdmin() (*model.Preset, error) {
+	p := &model.Preset{}
+	var isDefault int
+	// 查找 admin 角色用户的默认预设
+	err := s.db.QueryRow(`
+		SELECT p.id, p.user_id, p.name, p.system_prompt, p.prompts, p.temperature, p.max_tokens, p.top_p, p.is_default, p.created_at, p.updated_at
+		FROM presets p
+		JOIN users u ON u.id = p.user_id
+		WHERE u.role = 'admin' AND p.is_default = 1
+		ORDER BY p.updated_at DESC LIMIT 1`,
+	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
+		&isDefault, &p.CreatedAt, &p.UpdatedAt)
+	if err == nil {
+		p.IsDefault = isDefault == 1
+		return p, nil
+	}
+	// 回退：admin 没有标记默认，取 admin 的最新预设
+	err = s.db.QueryRow(`
+		SELECT p.id, p.user_id, p.name, p.system_prompt, p.prompts, p.temperature, p.max_tokens, p.top_p, p.is_default, p.created_at, p.updated_at
+		FROM presets p
+		JOIN users u ON u.id = p.user_id
+		WHERE u.role = 'admin'
+		ORDER BY p.updated_at DESC LIMIT 1`,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.SystemPrompt, &p.Prompts, &p.Temperature, &p.MaxTokens, &p.TopP,
 		&isDefault, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
