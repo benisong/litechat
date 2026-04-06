@@ -337,6 +337,9 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		enabled = append(enabled, e)
 	}
 
+	// 按 order 排序（保证 prompt_order 顺序）
+	sortEntries(enabled)
+
 	// Step A: system_prompt=true → 合并为系统消息块
 	var systemContent strings.Builder
 	for _, e := range enabled {

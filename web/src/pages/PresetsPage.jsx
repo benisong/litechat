@@ -188,7 +188,7 @@ export default function PresetsPage() {
             system_prompt: p.system_prompt !== false,
             injection_position: p.injection_position ?? 0,
             injection_depth: p.injection_depth ?? 0,
-            order: p.injection_order ?? (sortIndex * 10),
+            order: sortIndex,  // 用 prompt_order 的位置索引决定顺序
           }
         })
     }
