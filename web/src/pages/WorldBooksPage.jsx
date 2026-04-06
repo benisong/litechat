@@ -43,10 +43,22 @@ export default function WorldBooksPage() {
   const handleCreateBook = async () => {
     if (!newBookForm.name.trim()) { showToast('请填写世界书名称', 'error'); return }
     try {
-      await createWorldBook(newBookForm)
+      const wb = await createWorldBook(newBookForm)
+      // 自动创建默认条目「默认规则」
+      await createEntry(wb.id, {
+        ...DEFAULT_ENTRY,
+        keys: '默认规则',
+        content: '在此填写世界书的默认规则内容',
+        constant: true,
+        enabled: true,
+        injection_depth: 0,
+      })
       setShowNewBook(false)
       setNewBookForm({ name: '', description: '', character_id: '' })
       showToast('世界书创建成功', 'success')
+      // 打开新建的世界书
+      await fetchWorldBook(wb.id)
+      setView('book')
     } catch { showToast('创建失败', 'error') }
   }
 
@@ -393,7 +405,7 @@ export default function WorldBooksPage() {
             <label className="block text-xs text-gray-400 mb-2">类型</label>
             <div className="flex gap-3">
               <button
-                onClick={() => setNewBookForm(f => ({ ...f, character_id: '' }))}
+                onClick={() => setNewBookForm(f => ({ ...f, character_id: '', name: '' }))}
                 className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
                   !newBookForm.character_id
                     ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
@@ -403,7 +415,14 @@ export default function WorldBooksPage() {
                 <span className="text-sm">全局</span>
               </button>
               <button
-                onClick={() => setNewBookForm(f => ({ ...f, character_id: characters[0]?.id || '' }))}
+                onClick={() => {
+                  const firstChar = characters[0]
+                  setNewBookForm(f => ({
+                    ...f,
+                    character_id: firstChar?.id || '',
+                    name: firstChar ? `${firstChar.name} 🌍` : '',
+                  }))
+                }}
                 className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
                   newBookForm.character_id
                     ? 'border-purple-500/50 bg-purple-500/10 text-purple-300'
@@ -421,7 +440,15 @@ export default function WorldBooksPage() {
               <label className="block text-xs text-gray-400 mb-1.5">选择角色</label>
               <select className="w-full input-base text-sm bg-surface appearance-none"
                 value={newBookForm.character_id}
-                onChange={e => setNewBookForm(f => ({ ...f, character_id: e.target.value }))}>
+                onChange={e => {
+                  const charId = e.target.value
+                  const char = characters.find(c => c.id === charId)
+                  setNewBookForm(f => ({
+                    ...f,
+                    character_id: charId,
+                    name: char ? `${char.name} 🌍` : f.name,
+                  }))
+                }}>
                 {characters.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
