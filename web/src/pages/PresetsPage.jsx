@@ -159,13 +159,16 @@ export default function PresetsPage() {
     // 构建 prompt_order 的 enabled 映射（ST 用 prompt_order 决定实际启用状态和顺序）
     const orderMap = {} // identifier → { enabled, index }
     if (Array.isArray(json.prompt_order)) {
-      // 取最后一个 character_id 的 order（通常是实际使用的）
-      const lastOrder = json.prompt_order[json.prompt_order.length - 1]
-      if (lastOrder?.order) {
-        lastOrder.order.forEach((item, idx) => {
-          orderMap[item.identifier] = { enabled: item.enabled !== false, index: idx }
-        })
+      // 遍历所有 character_id 的 order，合并（后面的覆盖前面的）
+      for (const po of json.prompt_order) {
+        if (po?.order && Array.isArray(po.order)) {
+          po.order.forEach((item, idx) => {
+            orderMap[item.identifier] = { enabled: item.enabled === true, index: idx }
+          })
+        }
       }
+      console.log('[ST导入] prompt_order 映射:', Object.keys(orderMap).length, '项',
+        Object.entries(orderMap).filter(([,v]) => !v.enabled).map(([k]) => k).join(', ') || '(全部启用)')
     }
 
     // SillyTavern 格式：prompts 数组
