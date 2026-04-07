@@ -69,6 +69,14 @@ export const useAuthStore = create(
         set({ user: null, token: null })
       },
 
+      // 刷新当前用户信息（含余额等）
+      fetchMe: async () => {
+        try {
+          const data = await apiFetch('/auth/me')
+          set({ user: data })
+        } catch {}
+      },
+
       isLoggedIn: () => !!get().token,
       isAdmin: () => get().user?.role === 'admin',
     }),
@@ -101,6 +109,13 @@ export const useUserStore = create((set) => ({
     await apiFetch('/auth/password', {
       method: 'PUT', body: { old_password, new_password },
     })
+  },
+  updateBalance: async (userId, delta) => {
+    const data = await apiFetch(`/auth/users/${userId}/balance`, {
+      method: 'PUT', body: { delta },
+    })
+    set(s => ({ users: s.users.map(u => u.id === userId ? { ...u, balance: data.balance } : u) }))
+    return data
   },
 }))
 

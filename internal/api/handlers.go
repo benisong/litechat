@@ -878,6 +878,46 @@ func (h *Handlers) FetchModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"models": models})
 }
 
+// ========== 计费 API ==========
+
+// UpdateBalance PUT /api/auth/users/:id/balance 修改用户积分余额（管理员）
+func (h *Handlers) UpdateBalance(c *gin.Context) {
+	targetID := c.Param("id")
+	var req struct {
+		Balance *int `json:"balance"` // 设置绝对值
+		Delta   *int `json:"delta"`   // 增减值（优先级高于 balance）
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Delta != nil {
+		// 增减模式
+		if err := h.userStore.AddBalance(targetID, *req.Delta); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else if req.Balance != nil {
+		// 设置绝对值
+		if err := h.userStore.SetBalance(targetID, *req.Balance); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 balance 或 delta 参数"})
+		return
+	}
+
+	// 返回更新后的用户信息
+	user, _ := h.userStore.GetByID(targetID)
+	if user != nil {
+		c.JSON(http.StatusOK, user)
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "余额已更新"})
+	}
+}
+
 // isKeyMasked 判断 API 密钥是否是掩码值
 func isKeyMasked(key string) bool {
 	return len(key) > 3 && key[:3] == "***"

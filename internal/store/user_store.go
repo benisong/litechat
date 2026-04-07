@@ -40,9 +40,9 @@ func (s *UserStore) Create(user *model.User) error {
 func (s *UserStore) GetByID(id string) (*model.User, error) {
 	user := &model.User{}
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, balance, total_tokens, total_messages, created_at, updated_at
 		FROM users WHERE id = ?`, id,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.Balance, &user.TotalTokens, &user.TotalMessages, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -53,17 +53,17 @@ func (s *UserStore) GetByID(id string) (*model.User, error) {
 func (s *UserStore) GetByUsername(username string) (*model.User, error) {
 	user := &model.User{}
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, balance, total_tokens, total_messages, created_at, updated_at
 		FROM users WHERE username = ? AND role = 'admin'`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.Balance, &user.TotalTokens, &user.TotalMessages, &user.CreatedAt, &user.UpdatedAt)
 	if err == nil {
 		return user, nil
 	}
 	// 非 admin，需要知道当前模式才能查。先返回第一个匹配的
 	err = s.db.QueryRow(`
-		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, balance, total_tokens, total_messages, created_at, updated_at
 		FROM users WHERE username = ? ORDER BY created_at ASC LIMIT 1`, username,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.Balance, &user.TotalTokens, &user.TotalMessages, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
 
@@ -72,9 +72,9 @@ func (s *UserStore) GetByUsernameAndMode(username, mode string) (*model.User, er
 	user := &model.User{}
 	// admin 用户不受 mode 限制
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, balance, total_tokens, total_messages, created_at, updated_at
 		FROM users WHERE username = ? AND (role = 'admin' OR mode = ?)`, username, mode,
-	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.Balance, &user.TotalTokens, &user.TotalMessages, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (s *UserStore) GetByUsernameAndMode(username, mode string) (*model.User, er
 // List 查询所有用户（按当前模式过滤，admin 始终可见）
 func (s *UserStore) List(mode string) ([]*model.User, error) {
 	rows, err := s.db.Query(`
-		SELECT id, username, password_hash, role, mode, created_at, updated_at
+		SELECT id, username, password_hash, role, mode, balance, total_tokens, total_messages, created_at, updated_at
 		FROM users WHERE role = 'admin' OR mode = ?
 		ORDER BY role DESC, created_at ASC`, mode)
 	if err != nil {
@@ -95,7 +95,7 @@ func (s *UserStore) List(mode string) ([]*model.User, error) {
 	var list []*model.User
 	for rows.Next() {
 		user := &model.User{}
-		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.Balance, &user.TotalTokens, &user.TotalMessages, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, user)
@@ -241,4 +241,61 @@ func (s *UserStore) CreateDefaultCharacter(userID string) {
 	} else {
 		log.Printf("已为用户 %s 创建默认角色卡「小助手」", userID)
 	}
+}
+
+// ========== 计费相关 ==========
+
+// GetBalance 查询用户积分余额
+func (s *UserStore) GetBalance(userID string) (int, error) {
+	var balance int
+	err := s.db.QueryRow(`SELECT balance FROM users WHERE id = ?`, userID).Scan(&balance)
+	return balance, err
+}
+
+// SetBalance 设置用户积分余额（绝对值）
+func (s *UserStore) SetBalance(userID string, balance int) error {
+	result, err := s.db.Exec(`UPDATE users SET balance = ?, updated_at = ? WHERE id = ?`,
+		balance, time.Now(), userID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("用户不存在: %s", userID)
+	}
+	return nil
+}
+
+// AddBalance 增加积分（可为负数表示扣除）
+func (s *UserStore) AddBalance(userID string, amount int) error {
+	result, err := s.db.Exec(`UPDATE users SET balance = balance + ?, updated_at = ? WHERE id = ?`,
+		amount, time.Now(), userID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("用户不存在: %s", userID)
+	}
+	return nil
+}
+
+// DeductAndRecord 扣除1积分 + 累加用量统计（原子操作）
+func (s *UserStore) DeductAndRecord(userID string, tokens int) error {
+	result, err := s.db.Exec(`
+		UPDATE users SET
+			balance = balance - 1,
+			total_tokens = total_tokens + ?,
+			total_messages = total_messages + 1,
+			updated_at = ?
+		WHERE id = ?`,
+		tokens, time.Now(), userID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("用户不存在: %s", userID)
+	}
+	return nil
 }

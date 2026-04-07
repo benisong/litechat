@@ -34,6 +34,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.GET("/auth/users", AdminOnly(), h.ListUsers)
 		api.PUT("/auth/users/:id", AdminOnly(), h.UpdateUser)
 		api.DELETE("/auth/users/:id", AdminOnly(), h.DeleteUser)
+		api.PUT("/auth/users/:id/balance", AdminOnly(), h.UpdateBalance)
 
 		// 角色卡
 		api.GET("/characters", h.ListCharacters)

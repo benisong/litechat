@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, Trash2, RefreshCw } from 'lucide-react'
-import { useChatStore, useCharacterStore, useUIStore } from '../store'
+import { useChatStore, useCharacterStore, useUIStore, useAuthStore, useSettingsStore } from '../store'
 import MessageBubble from '../components/chat/MessageBubble'
 import ChatInput from '../components/chat/ChatInput'
 import Avatar from '../components/ui/Avatar'
@@ -14,6 +14,12 @@ export default function ChatPage() {
 
   const { currentChat, messages, streaming, fetchMessages, sendMessage, deleteChat, deleteMessageCascade, regenerate } = useChatStore()
   const { characters } = useCharacterStore()
+  const { user, fetchMe } = useAuthStore()
+  const { settings } = useSettingsStore()
+
+  const isServiceMode = settings.service_mode === 'service'
+  const isAdmin = user?.role === 'admin'
+  const noBalance = isServiceMode && !isAdmin && (user?.balance ?? 0) <= 0
 
   const [chat, setChat] = useState(null)
   const [character, setCharacter] = useState(null)
@@ -61,6 +67,8 @@ export default function ChatPage() {
   const handleSend = async (content) => {
     try {
       await sendMessage(chatId, content)
+      // 服务模式下刷新用户信息（更新余额）
+      if (isServiceMode && !isAdmin) fetchMe()
     } catch (err) {
       showToast(err.message || '发送失败', 'error')
     }
@@ -107,10 +115,14 @@ export default function ChatPage() {
           <h2 className="font-semibold text-sm truncate">
             {character?.name || chat?.title || '…'}
           </h2>
-          {streaming && (
+          {streaming ? (
             <span className="text-xs text-primary-400 flex items-center gap-1">
               <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-pulse" />
               正在输入…
+            </span>
+          ) : isServiceMode && !isAdmin && (
+            <span className={`text-xs ${noBalance ? 'text-red-400' : 'text-gray-500'}`}>
+              积分: {user?.balance ?? 0}
             </span>
           )}
         </div>
@@ -153,7 +165,15 @@ export default function ChatPage() {
       </div>
 
       {/* 输入框 */}
-      <ChatInput onSend={handleSend} disabled={streaming} />
+      {noBalance ? (
+        <div className="glass border-t border-surface-border px-4 py-4
+                        pb-[calc(env(safe-area-inset-bottom,0px)+1rem)]
+                        text-center text-sm text-red-400">
+          积分不足，请联系管理员充值
+        </div>
+      ) : (
+        <ChatInput onSend={handleSend} disabled={streaming} />
+      )}
 
       {/* 菜单弹窗 */}
       <Modal open={showMenu} onClose={() => setShowMenu(false)} title="对话操作">

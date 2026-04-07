@@ -194,6 +194,11 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
 
+	// 计费相关字段
+	db.Exec(`ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE users ADD COLUMN total_tokens INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE users ADD COLUMN total_messages INTEGER DEFAULT 0`)
+
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE chats ADD COLUMN user_id TEXT DEFAULT ''`)

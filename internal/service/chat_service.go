@@ -75,6 +75,17 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	// 判断是否为服务模式
 	isServiceMode := s.userStore.GetCurrentMode() == "service"
 
+	// 服务模式下检查用户余额（admin 不检查）
+	if isServiceMode {
+		user, err := s.userStore.GetByID(userID)
+		if err != nil {
+			return "", fmt.Errorf("获取用户信息失败: %w", err)
+		}
+		if user.Role != "admin" && user.Balance <= 0 {
+			return "", fmt.Errorf("积分不足，请联系管理员充值")
+		}
+	}
+
 	var preset *model.Preset
 	if presetIDToUse != "" {
 		preset, err = s.presetStore.GetByID(presetIDToUse, userID)
@@ -164,7 +175,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	}
 
 	// 调用 OpenAI 兼容 API（流式）
-	fullResponse, err := s.callOpenAIStream(settings, preset, messages, callback)
+	fullResponse, totalTokens, err := s.callOpenAIStream(settings, preset, messages, callback)
 
 	// 调试日志（始终记录摘要，文件保存可按需开启）
 	s.debugLogResponse(chatID, fullResponse, err)
@@ -173,14 +184,28 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		return "", err
 	}
 
-	// 保存 AI 响应消息
+	// 保存 AI 响应消息（含 token 数）
 	aiMsg := &model.Message{
 		ChatID:  chatID,
 		Role:    "assistant",
 		Content: fullResponse,
+		Tokens:  totalTokens,
 	}
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 消息失败: %w", err)
+	}
+
+	// 服务模式下扣费 + 记录用量（admin 不扣费）
+	if isServiceMode {
+		user, _ := s.userStore.GetByID(userID)
+		if user != nil && user.Role != "admin" {
+			if err := s.userStore.DeductAndRecord(userID, totalTokens); err != nil {
+				log.Printf("[计费] 扣费失败 user=%s: %v", userID, err)
+			} else {
+				log.Printf("[计费] 扣费成功 user=%s tokens=%d 余额=%d→%d",
+					userID, totalTokens, user.Balance, user.Balance-1)
+			}
+		}
 	}
 
 	// 更新对话的 updated_at
@@ -261,21 +286,39 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 		return "", fmt.Errorf("获取配置失败: %w", err)
 	}
 
+	// 服务模式下检查余额
+	isServiceMode := s.userStore.GetCurrentMode() == "service"
+	if isServiceMode {
+		user, _ := s.userStore.GetByID(userID)
+		if user != nil && user.Role != "admin" && user.Balance <= 0 {
+			return "", fmt.Errorf("积分不足，请联系管理员充值")
+		}
+	}
+
 	// 调用 API
-	fullResponse, err := s.callOpenAIStream(settings, preset, messages, callback)
+	fullResponse, totalTokens, err := s.callOpenAIStream(settings, preset, messages, callback)
 	s.debugLogResponse(chatID, fullResponse, err)
 	if err != nil {
 		return "", err
 	}
 
-	// 保存新的 AI 响应
+	// 保存新的 AI 响应（含 token 数）
 	aiMsg := &model.Message{
 		ChatID:  chatID,
 		Role:    "assistant",
 		Content: fullResponse,
+		Tokens:  totalTokens,
 	}
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 消息失败: %w", err)
+	}
+
+	// 服务模式下扣费
+	if isServiceMode {
+		user, _ := s.userStore.GetByID(userID)
+		if user != nil && user.Role != "admin" {
+			s.userStore.DeductAndRecord(userID, totalTokens)
+		}
 	}
 
 	_ = s.chatStore.Touch(chatID, userID)
@@ -819,7 +862,8 @@ func (s *ChatService) matchWorldBookEntry(entry *model.WorldBookEntry, chatHisto
 }
 
 // callOpenAIStream 调用 OpenAI 兼容 API 并流式返回
-func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *model.Preset, messages []model.ChatCompletionMessage, callback StreamCallback) (string, error) {
+// 返回：完整响应文本、token用量、错误
+func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *model.Preset, messages []model.ChatCompletionMessage, callback StreamCallback) (string, int, error) {
 	reqBody := model.ChatCompletionRequest{
 		Model:       settings.DefaultModel,
 		Messages:    messages,
@@ -831,13 +875,13 @@ func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *mode
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	apiURL := strings.TrimRight(settings.APIEndpoint, "/") + "/chat/completions"
 	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -847,17 +891,18 @@ func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *mode
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("API 请求失败: %w", err)
+		return "", 0, fmt.Errorf("API 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API 错误 %d: %s", resp.StatusCode, string(body))
+		return "", 0, fmt.Errorf("API 错误 %d: %s", resp.StatusCode, string(body))
 	}
 
 	// 解析 SSE 流（兼容各种第三方 API 格式）
 	var fullContent strings.Builder
+	var totalTokens int
 	scanner := bufio.NewScanner(resp.Body)
 	// 增大缓冲区到 1MB，防止长行被截断
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -906,6 +951,11 @@ func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *mode
 					Content string `json:"content"`
 				} `json:"message"`
 			} `json:"choices"`
+			Usage *struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -928,13 +978,17 @@ func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *mode
 				}
 			}
 		}
+		// 提取 token 用量（通常在最后一个 chunk 中）
+		if chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
+			totalTokens = chunk.Usage.TotalTokens
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		log.Printf("[SSE] 读取流错误: %v (已收集 %d 字节)", err, fullContent.Len())
 	}
 
-	return fullContent.String(), nil
+	return fullContent.String(), totalTokens, nil
 }
 
 // inputFormatHint 追加到 system prompt 末尾的格式提示

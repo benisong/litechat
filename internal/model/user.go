@@ -4,13 +4,16 @@ import "time"
 
 // User 用户模型
 type User struct {
-	ID           string    `json:"id" db:"id"`
-	Username     string    `json:"username" db:"username"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	Role         string    `json:"role" db:"role"`       // admin / user
-	Mode         string    `json:"mode" db:"mode"`       // self / service（用户所属模式）
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	ID            string    `json:"id" db:"id"`
+	Username      string    `json:"username" db:"username"`
+	PasswordHash  string    `json:"-" db:"password_hash"`
+	Role          string    `json:"role" db:"role"`       // admin / user
+	Mode          string    `json:"mode" db:"mode"`       // self / service（用户所属模式）
+	Balance       int       `json:"balance" db:"balance"`              // 积分余额
+	TotalTokens   int       `json:"total_tokens" db:"total_tokens"`    // 累计消耗 token
+	TotalMessages int       `json:"total_messages" db:"total_messages"` // 累计发送消息条数
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // LoginRequest 登录请求

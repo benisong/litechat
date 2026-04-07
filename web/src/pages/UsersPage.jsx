@@ -1,22 +1,28 @@
 import React, { useEffect, useState } from 'react'
-import { Users, Plus, Trash2, Shield, User, Edit2, Key, Save } from 'lucide-react'
-import { useUserStore, useAuthStore, useUIStore } from '../store'
+import { Users, Plus, Trash2, Shield, User, Edit2, Key, Coins } from 'lucide-react'
+import { useUserStore, useAuthStore, useUIStore, useSettingsStore } from '../store'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
 
 export default function UsersPage() {
-  const { users, fetchUsers, createUser, deleteUser } = useUserStore()
+  const { users, fetchUsers, createUser, deleteUser, updateBalance } = useUserStore()
   const { user: currentUser, logout } = useAuthStore()
+  const { settings } = useSettingsStore()
   const { showToast } = useUIStore()
   const [showNew, setShowNew] = useState(false)
-  const [editUser, setEditUser] = useState(null) // 编辑中的用户
-  const [showEditSelf, setShowEditSelf] = useState(false) // 编辑自身
+  const [editUser, setEditUser] = useState(null)
+  const [showEditSelf, setShowEditSelf] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', role: 'user' })
   const [selfForm, setSelfForm] = useState({ username: '', old_password: '', new_password: '' })
 
+  // 充值弹窗
+  const [balanceUser, setBalanceUser] = useState(null)
+  const [balanceDelta, setBalanceDelta] = useState('')
+
+  const isServiceMode = settings.service_mode === 'service'
+
   useEffect(() => { fetchUsers() }, [])
 
-  // 创建用户
   const handleCreate = async () => {
     if (!form.username.trim() || !form.password) {
       showToast('请填写用户名和密码', 'error'); return
@@ -29,7 +35,6 @@ export default function UsersPage() {
     } catch (err) { showToast(err.message, 'error') }
   }
 
-  // 删除用户
   const handleDelete = async (id) => {
     if (!confirm('确定要删除该用户吗？其所有数据将一并删除。')) return
     try {
@@ -38,13 +43,11 @@ export default function UsersPage() {
     } catch (err) { showToast(err.message, 'error') }
   }
 
-  // 打开编辑弹窗
   const openEdit = (u) => {
     setEditUser(u)
     setForm({ username: u.username, password: '', role: u.role })
   }
 
-  // 保存编辑
   const handleSaveEdit = async () => {
     if (!form.username.trim()) { showToast('用户名不能为空', 'error'); return }
     try {
@@ -68,7 +71,6 @@ export default function UsersPage() {
     } catch (err) { showToast(err.message, 'error') }
   }
 
-  // admin 修改自身
   const openEditSelf = () => {
     setSelfForm({ username: currentUser.username, old_password: '', new_password: '' })
     setShowEditSelf(true)
@@ -79,7 +81,6 @@ export default function UsersPage() {
       const token = useAuthStore.getState().token
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
 
-      // 修改用户名（通过 admin 接口）
       if (selfForm.username !== currentUser.username) {
         const res = await fetch(`/api/auth/users/${currentUser.id}`, {
           method: 'PUT', headers,
@@ -88,7 +89,6 @@ export default function UsersPage() {
         if (!res.ok) { const e = await res.json(); throw new Error(e.error) }
       }
 
-      // 修改密码
       if (selfForm.old_password && selfForm.new_password) {
         const res = await fetch('/api/auth/password', {
           method: 'PUT', headers,
@@ -100,12 +100,26 @@ export default function UsersPage() {
       showToast('修改成功，请重新登录', 'success')
       setShowEditSelf(false)
 
-      // 如果用户名或密码改了，需要重新登录
       if (selfForm.username !== currentUser.username || selfForm.new_password) {
         setTimeout(() => logout(), 1500)
       } else {
         fetchUsers()
       }
+    } catch (err) { showToast(err.message, 'error') }
+  }
+
+  // 充值/扣费
+  const handleBalance = async () => {
+    const delta = parseInt(balanceDelta)
+    if (isNaN(delta) || delta === 0) {
+      showToast('请输入有效的积分数', 'error'); return
+    }
+    try {
+      await updateBalance(balanceUser.id, delta)
+      showToast(`${delta > 0 ? '充值' : '扣除'} ${Math.abs(delta)} 积分成功`, 'success')
+      setBalanceUser(null)
+      setBalanceDelta('')
+      fetchUsers()
     } catch (err) { showToast(err.message, 'error') }
   }
 
@@ -155,15 +169,30 @@ export default function UsersPage() {
                   {u.role === 'admin' ? '管理员' : '用户'}
                 </span>
               </div>
-              <p className="text-xs text-gray-500">
-                创建于 {new Date(u.created_at).toLocaleDateString('zh-CN')}
-              </p>
+              {/* 用量统计（服务模式下显示） */}
+              {isServiceMode && u.role !== 'admin' ? (
+                <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+                  <span>余额: <span className={clsx('font-medium', u.balance > 0 ? 'text-green-400' : 'text-red-400')}>{u.balance}</span></span>
+                  <span>消息: {u.total_messages || 0}</span>
+                  <span>Token: {(u.total_tokens || 0).toLocaleString()}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  创建于 {new Date(u.created_at).toLocaleDateString('zh-CN')}
+                </p>
+              )}
             </div>
 
             <div className="flex gap-1">
-              {/* 编辑按钮（自身通过"修改账户"按钮编辑） */}
               {u.id !== currentUser?.id && (
                 <>
+                  {/* 充值按钮（服务模式 + 非admin） */}
+                  {isServiceMode && u.role !== 'admin' && (
+                    <button onClick={() => { setBalanceUser(u); setBalanceDelta('') }}
+                      className="p-2 text-gray-500 hover:text-amber-400 transition-colors rounded-lg">
+                      <Coins size={15} />
+                    </button>
+                  )}
                   <button onClick={() => openEdit(u)}
                     className="p-2 text-gray-500 hover:text-white transition-colors rounded-lg">
                     <Edit2 size={15} />
@@ -259,6 +288,49 @@ export default function UsersPage() {
             <button onClick={handleSaveSelf} className="flex-1 btn-primary py-3">保存</button>
           </div>
         </div>
+      </Modal>
+
+      {/* 充值/扣费弹窗 */}
+      <Modal open={!!balanceUser} onClose={() => setBalanceUser(null)}
+        title={`积分管理: ${balanceUser?.username}`}>
+        {balanceUser && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-surface-border">
+              <span className="text-sm text-gray-400">当前余额</span>
+              <span className={clsx('text-lg font-bold', balanceUser.balance > 0 ? 'text-green-400' : 'text-red-400')}>
+                {balanceUser.balance} 积分
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-xl bg-surface/50 border border-surface-border text-xs text-gray-500">
+              <span>累计消息: {balanceUser.total_messages || 0} 条</span>
+              <span>累计Token: {(balanceUser.total_tokens || 0).toLocaleString()}</span>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">充值/扣除积分</label>
+              <input type="number" className="w-full input-base" value={balanceDelta}
+                onChange={e => setBalanceDelta(e.target.value)}
+                placeholder="正数充值，负数扣除" />
+              {balanceDelta && !isNaN(parseInt(balanceDelta)) && (
+                <p className="text-xs text-gray-500 mt-1">
+                  操作后余额: <span className="font-medium text-gray-300">
+                    {balanceUser.balance + parseInt(balanceDelta)} 积分
+                  </span>
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setBalanceUser(null)}
+                className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
+                           hover:bg-surface-hover transition-colors">取消</button>
+              <button onClick={handleBalance} className="flex-1 btn-primary py-3">
+                确认
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
