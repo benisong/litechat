@@ -26,6 +26,7 @@ export default function ChatInput({ onSend, disabled }) {
     if (!content || disabled) return
     onSend(content)
     setText('')
+    setActiveTool('colon')
     // 重置高度
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
