@@ -451,6 +451,40 @@ func processDynamicMacros(text string) string {
 
 var macroRegex = regexp.MustCompile(`\{\{[^}]+\}\}`)
 
+// cleanAssistantContent 清理 AI 回复中的思考块和隐藏标签，避免污染上下文
+func cleanAssistantContent(text string) string {
+	// 移除 <think>...</think>
+	text = thinkRegex.ReplaceAllString(text, "")
+	// 移除 <CoT>...</CoT>
+	text = cotRegex.ReplaceAllString(text, "")
+	// 移除隐藏的自定义标签
+	for _, re := range hiddenTagRegexes {
+		text = re.ReplaceAllString(text, "")
+	}
+	// 清理多余空行
+	text = multiNewlineRegex.ReplaceAllString(text, "\n\n")
+	return strings.TrimSpace(text)
+}
+
+var thinkRegex = regexp.MustCompile(`(?is)<think>[\s\S]*?</think>`)
+var cotRegex = regexp.MustCompile(`(?is)<CoT>[\s\S]*?</CoT>`)
+var multiNewlineRegex = regexp.MustCompile(`\n{3,}`)
+var hiddenTagRegexes = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)<!--[\s\S]*?-->`),
+	regexp.MustCompile(`(?is)<TBC>[\s\S]*?</TBC>`),
+	regexp.MustCompile(`(?is)<rule>[\s\S]*?</rule>`),
+	regexp.MustCompile(`(?is)<system>[\s\S]*?</system>`),
+	regexp.MustCompile(`(?is)<CONFIG>[\s\S]*?</CONFIG>`),
+	regexp.MustCompile(`(?is)<AWC>[\s\S]*?</AWC>`),
+	regexp.MustCompile(`(?is)<ASI>[\s\S]*?</ASI>`),
+	regexp.MustCompile(`(?is)<STORYTIME>[\s\S]*?</STORYTIME>`),
+	regexp.MustCompile(`(?is)<INTERACTION_MOD>[\s\S]*?</INTERACTION_MOD>`),
+	regexp.MustCompile(`(?is)<TALKER_MOD>[\s\S]*?</TALKER_MOD>`),
+	regexp.MustCompile(`(?is)<novelist_MOD>[\s\S]*?</novelist_MOD>`),
+	regexp.MustCompile(`(?is)<WritingStyle>[\s\S]*?</WritingStyle>`),
+	regexp.MustCompile(`(?is)<语言风格>[\s\S]*?</语言风格>`),
+}
+
 // buildMessages 构建完整的消息列表
 // 如果预设有多段 Prompts（高级模式），按 SillyTavern 格式注入
 // 否则回退到简单模式（单段 SystemPrompt）
@@ -464,8 +498,13 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		})
 	} else {
 		for _, msg := range history {
+			content := msg.Content
+			// 清理 AI 回复中的思考块和隐藏标签
+			if msg.Role == "assistant" {
+				content = cleanAssistantContent(content)
+			}
 			chatHistory = append(chatHistory, model.ChatCompletionMessage{
-				Role: msg.Role, Content: msg.Content,
+				Role: msg.Role, Content: content,
 			})
 		}
 	}
