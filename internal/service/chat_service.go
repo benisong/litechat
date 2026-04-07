@@ -116,6 +116,21 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		return "", fmt.Errorf("获取消息历史失败: %w", err)
 	}
 
+	// 如果是第一条消息且角色有开场白，先持久化开场白
+	if len(history) == 0 && character.FirstMsg != "" {
+		firstMsg := &model.Message{
+			ChatID:  chatID,
+			Role:    "assistant",
+			Content: character.FirstMsg,
+		}
+		if err := s.messageStore.Create(firstMsg); err != nil {
+			log.Printf("[开场白] 保存失败: %v", err)
+		} else {
+			// 将开场白加入历史，以便后续 buildMessages 正确处理
+			history = append(history, firstMsg)
+		}
+	}
+
 	// 保存用户消息
 	userMsg := &model.Message{
 		ChatID:  chatID,
@@ -469,7 +484,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 
 	// 3. 简单模式：单段 SystemPrompt
 	if len(entries) == 0 {
-		systemPrompt := s.replaceVars(preset.SystemPrompt, char)
+		systemPrompt := s.replaceVars(preset.SystemPrompt+inputFormatHint, char)
 		log.Printf("[消息组装] 简单模式，system_prompt 长度=%d", len(systemPrompt))
 		messages := []model.ChatCompletionMessage{
 			{Role: "system", Content: systemPrompt},
@@ -520,7 +535,8 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 
 	var result []model.ChatCompletionMessage
 	if systemContent.Len() > 0 {
-		// 追加 [开始新对话] 分隔符（SillyTavern chatHistory marker）
+		// 追加格式说明 + [开始新对话] 分隔符
+		systemContent.WriteString(s.replaceVars(inputFormatHint, char))
 		systemContent.WriteString("\n\n[开始新对话]")
 		result = append(result, model.ChatCompletionMessage{
 			Role: "system", Content: systemContent.String(),
@@ -881,6 +897,9 @@ func (s *ChatService) callOpenAIStream(settings *model.AppSettings, preset *mode
 
 	return fullContent.String(), nil
 }
+
+// inputFormatHint 追加到 system prompt 末尾的格式提示
+const inputFormatHint = "\n\n[格式说明] 用户消息中，\u201C\u201D包裹的内容是{{user}}说出口的话；\uFF08\uFF09包裹的内容是{{user}}的内心想法，{{char}}无法感知到；其余内容是动作描写或旁白。"
 
 // DebugEnabled 控制是否将 AI 响应写入文件，方便调试
 var DebugEnabled = true
