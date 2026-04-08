@@ -309,6 +309,9 @@ function buildCharacterFromTemplate(choices) {
     scenario: base.scenario,
     first_msg: firstMsg,
     tags: base.tags + ',' + personaData.label,
+    use_custom_user: false,
+    user_name: '',
+    user_detail: '',
   }
 }
 
@@ -319,6 +322,7 @@ export default function CharactersPage() {
   const { showToast } = useUIStore()
   const [deletingId, setDeletingId] = useState(null)
   const [selectedChar, setSelectedChar] = useState(null)
+  const [confirmDeleteChar, setConfirmDeleteChar] = useState(null)
 
   // 模板选择状态
   const [showTemplatePrompt, setShowTemplatePrompt] = useState(false)
@@ -338,13 +342,22 @@ export default function CharactersPage() {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDeleteClick = () => {
+    setConfirmDeleteChar(selectedChar)
+    setSelectedChar(null)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!confirmDeleteChar) return
     try {
-      await deleteCharacter(selectedChar.id)
+      await deleteCharacter(confirmDeleteChar.id)
+      // 删除角色会级联删除关联对话，刷新对话列表以保持同步
+      useChatStore.getState().fetchChats()
       showToast('角色已删除', 'success')
-      setSelectedChar(null)
     } catch {
       showToast('删除失败', 'error')
+    } finally {
+      setConfirmDeleteChar(null)
     }
   }
 
@@ -548,11 +561,45 @@ export default function CharactersPage() {
                 <Edit2 size={16} />
               </button>
               <button
-                onClick={handleDelete}
+                onClick={handleDeleteClick}
                 className="px-4 py-2.5 rounded-xl border border-red-500/30 text-red-400
                            hover:bg-red-500/10 transition-colors"
               >
                 <Trash2 size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 删除确认弹窗 */}
+      <Modal
+        open={!!confirmDeleteChar}
+        onClose={() => setConfirmDeleteChar(null)}
+        title="确认删除"
+      >
+        {confirmDeleteChar && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-300">
+              确定要删除角色「{confirmDeleteChar.name}」吗？
+            </p>
+            <p className="text-xs text-red-400">
+              删除后将同时删除该角色的所有对话和消息，此操作不可恢复。
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setConfirmDeleteChar(null)}
+                className="flex-1 py-2.5 rounded-xl border border-surface-border text-gray-300
+                           hover:bg-surface-hover transition-colors text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm
+                           hover:bg-red-700 transition-colors"
+              >
+                确认删除
               </button>
             </div>
           </div>

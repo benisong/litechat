@@ -6,9 +6,6 @@ import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
 
-// 默认简单模式模板
-const DEFAULT_SYSTEM_PROMPT = '你是{{char}}。请根据角色设定进行扮演，保持角色一致性。\n\n角色描述：{{description}}\n\n性格：{{personality}}\n\n场景：{{scenario}}'
-
 // 新建空的提示词条目
 function newEntry(overrides = {}) {
   return {
@@ -34,7 +31,7 @@ const DEFAULT_PROMPTS = [
 
 const DEFAULT_FORM = {
   name: '',
-  system_prompt: DEFAULT_SYSTEM_PROMPT,
+  system_prompt: '',
   prompts: '',
   temperature: 0.8,
   max_tokens: 2048,
@@ -53,8 +50,7 @@ export default function PresetsPage() {
   const { showToast } = useUIStore()
   const [editPreset, setEditPreset] = useState(null) // null | 'new' | preset obj
   const [form, setForm] = useState(DEFAULT_FORM)
-  const [mode, setMode] = useState('simple') // 'simple' | 'advanced'
-  const [entries, setEntries] = useState([]) // 高级模式的多段提示词
+  const [entries, setEntries] = useState([]) // 多段提示词
   const [expandedEntry, setExpandedEntry] = useState(null) // 展开编辑的条目 ID
   const fileInputRef = useRef(null)
   const isAdmin = useAuthStore(s => s.user?.role === 'admin')
@@ -63,25 +59,23 @@ export default function PresetsPage() {
 
   const openNew = () => {
     setForm(DEFAULT_FORM)
-    setEntries([])
-    setMode('simple')
+    setEntries([...DEFAULT_PROMPTS])
     setEditPreset('new')
   }
 
   const openEdit = (preset) => {
     setForm({ ...preset })
-    // 如果有多段提示词，切换到高级模式
     if (preset.prompts) {
       try {
         setEntries(JSON.parse(preset.prompts))
-        setMode('advanced')
       } catch {
-        setEntries([])
-        setMode('simple')
+        setEntries([...DEFAULT_PROMPTS])
       }
+    } else if (preset.system_prompt) {
+      // 兼容旧的简单模式预设：自动转为单条 entry
+      setEntries([newEntry({ name: '系统提示词', content: preset.system_prompt, order: 0 })])
     } else {
-      setEntries([])
-      setMode('simple')
+      setEntries([...DEFAULT_PROMPTS])
     }
     setEditPreset(preset)
   }
@@ -89,13 +83,8 @@ export default function PresetsPage() {
   const handleSave = async () => {
     if (!form.name.trim()) { showToast('请填写预设名称', 'error'); return }
     const saveData = { ...form }
-    // 高级模式：将 entries 序列化为 JSON
-    if (mode === 'advanced' && entries.length > 0) {
-      saveData.prompts = JSON.stringify(entries)
-      saveData.system_prompt = '' // 高级模式不用简单提示词
-    } else {
-      saveData.prompts = ''
-    }
+    saveData.prompts = entries.length > 0 ? JSON.stringify(entries) : ''
+    saveData.system_prompt = '' // 统一使用多段提示词
     try {
       if (editPreset === 'new') {
         await createPreset(saveData)
@@ -235,17 +224,6 @@ export default function PresetsPage() {
     })
   }
 
-  // 切换到高级模式时，从简单模式的文本生成初始 entries
-  const switchToAdvanced = () => {
-    if (entries.length === 0) {
-      if (form.system_prompt) {
-        setEntries([newEntry({ name: '系统提示词', content: form.system_prompt, order: 0 })])
-      } else {
-        setEntries([...DEFAULT_PROMPTS])
-      }
-    }
-    setMode('advanced')
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -274,12 +252,6 @@ export default function PresetsPage() {
                     <Check size={10} /> 默认
                   </span>
                 )}
-                {preset.prompts && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300
-                                   px-2 py-0.5 rounded-full border border-amber-500/20">
-                    多段
-                  </span>
-                )}
               </div>
               <div className="flex items-center gap-1">
                 <button onClick={e => { e.stopPropagation(); openEdit(preset) }}
@@ -295,7 +267,7 @@ export default function PresetsPage() {
             <p className="text-xs text-gray-500 line-clamp-2">
               {preset.prompts
                 ? `${JSON.parse(preset.prompts).filter(p => p.enabled !== false).length} 段提示词`
-                : preset.system_prompt
+                : preset.system_prompt || '暂无提示词'
               }
             </p>
             <div className="flex gap-3 mt-2 text-[11px] text-gray-600">
@@ -322,54 +294,22 @@ export default function PresetsPage() {
               placeholder="例如：角色扮演标准" />
           </div>
 
-          {/* 模式切换 + 导入 */}
-          <div className="flex items-center gap-2">
-            <div className="flex bg-dark-200 rounded-xl p-0.5 border border-surface-border">
+          {/* 导入按钮 */}
+          {isAdmin && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setMode('simple')}
-                className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                  mode === 'simple' ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white'
-                )}
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border
+                           border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors ml-auto"
               >
-                简单模式
+                <Upload size={12} /> 导入 ST
               </button>
-              <button
-                onClick={switchToAdvanced}
-                className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
-                  mode === 'advanced' ? 'bg-primary-600 text-white' : 'text-gray-400 hover:text-white'
-                )}
-              >
-                高级模式
-              </button>
-            </div>
-            {/* 仅管理员可导入 SillyTavern 预设 */}
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border
-                             border-amber-500/40 text-amber-300 hover:bg-amber-500/10 transition-colors ml-auto"
-                >
-                  <Upload size={12} /> 导入 ST
-                </button>
-                <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
-              </>
-            )}
-          </div>
-
-          {/* 简单模式 */}
-          {mode === 'simple' && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">系统提示词</label>
-              <textarea className="w-full input-base resize-none text-sm" rows={6}
-                value={form.system_prompt}
-                onChange={e => setForm(f => ({ ...f, system_prompt: e.target.value }))}
-                placeholder="系统提示词…" />
+              <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             </div>
           )}
 
-          {/* 高级模式：多段提示词 */}
-          {mode === 'advanced' && (
+          {/* 多段提示词 */}
+          {(
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-gray-400">

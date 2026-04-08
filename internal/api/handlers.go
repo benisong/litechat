@@ -332,7 +332,13 @@ func (h *Handlers) UpdateCharacter(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, char)
+	// 重新查询以返回完整的数据库数据（包括正确的时间字段）
+	updated, err := h.characterStore.GetByID(char.ID, userID)
+	if err != nil {
+		c.JSON(http.StatusOK, char)
+		return
+	}
+	c.JSON(http.StatusOK, updated)
 }
 
 // DeleteCharacter DELETE /api/characters/:id

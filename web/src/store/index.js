@@ -131,6 +131,10 @@ export const useCharacterStore = create((set, get) => ({
     return data
   },
 
+  fetchCharacter: async (id) => {
+    return await apiFetch(`/characters/${id}`)
+  },
+
   deleteCharacter: async (id) => {
     await apiFetch(`/characters/${id}`, { method: 'DELETE' })
     set(s => ({ characters: s.characters.filter(c => c.id !== id) }))

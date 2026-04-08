@@ -121,7 +121,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		firstMsg := &model.Message{
 			ChatID:  chatID,
 			Role:    "assistant",
-			Content: character.FirstMsg,
+			Content: s.replaceVars(character.FirstMsg, character),
 		}
 		if err := s.messageStore.Create(firstMsg); err != nil {
 			log.Printf("[开场白] 保存失败: %v", err)
@@ -346,10 +346,15 @@ func (s *ChatService) replaceVars(template string, char *model.Character) string
 	// 角色变量
 	result = strings.ReplaceAll(result, "{{char}}", char.Name)
 
-	// {{description}} 前面拼接用户信息
+	// {{description}} 前面拼接用户信息（仅在用户实际配置了信息时）
 	userDetail := s.getUserDetail(char)
 	descWithUserInfo := char.Description
-	if userName != "" || userDetail != "" {
+	// 只有当用户主动设置了名称（非默认 "User"）或有详情时才拼接
+	hasCustomName := (char.UseCustomUser && char.UserName != "") || func() bool {
+		settings, err := s.configStore.GetSettings()
+		return err == nil && settings.DefaultUserName != ""
+	}()
+	if hasCustomName || userDetail != "" {
 		var userInfoBlock strings.Builder
 		userInfoBlock.WriteString("[用户信息]\n")
 		userInfoBlock.WriteString("用户名: " + userName + "\n")
@@ -494,7 +499,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	var chatHistory []model.ChatCompletionMessage
 	if char.FirstMsg != "" && len(history) == 0 {
 		chatHistory = append(chatHistory, model.ChatCompletionMessage{
-			Role: "assistant", Content: char.FirstMsg,
+			Role: "assistant", Content: s.replaceVars(char.FirstMsg, char),
 		})
 	} else {
 		for _, msg := range history {
@@ -512,30 +517,22 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		Role: "user", Content: userContent,
 	})
 
-	// 2. 尝试解析多段提示词
+	// 2. 解析多段提示词；如果没有则将 SystemPrompt 转为单条 entry
 	var entries []model.PromptEntry
 	if preset.Prompts != "" {
 		if err := json.Unmarshal([]byte(preset.Prompts), &entries); err != nil {
-			log.Printf("[预设] 解析多段提示词失败: %v，回退到简单模式", err)
+			log.Printf("[预设] 解析多段提示词失败: %v", err)
 			entries = nil
 		}
 	}
-
-	// 3. 简单模式：单段 SystemPrompt
-	if len(entries) == 0 {
-		systemPrompt := s.replaceVars(preset.SystemPrompt+inputFormatHint, char)
-		log.Printf("[消息组装] 简单模式，system_prompt 长度=%d", len(systemPrompt))
-		messages := []model.ChatCompletionMessage{
-			{Role: "system", Content: systemPrompt},
-		}
-		// 如果聊天历史第一条是 assistant（开场白），前面插入 user 消息
-		if len(chatHistory) > 0 && chatHistory[0].Role == "assistant" {
-			messages = append(messages, model.ChatCompletionMessage{Role: "user", Content: "[开始新对话]"})
-		}
-		return append(messages, chatHistory...)
+	if len(entries) == 0 && preset.SystemPrompt != "" {
+		entries = []model.PromptEntry{{
+			ID: "auto-system", Name: "系统提示词", Content: preset.SystemPrompt,
+			Role: "system", Enabled: true, SystemPrompt: true, Order: 0,
+		}}
 	}
 
-	// 4. 高级模式（SillyTavern 兼容组装）
+	// 3. 消息组装（SillyTavern 兼容）
 	//
 	// ST 的实际行为（从日志逆向分析）：
 	//   Step A: system_prompt=true 的条目 → 按顺序合并为一条 system 消息（[0]）

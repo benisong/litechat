@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ChevronLeft, Save, Upload, User } from 'lucide-react'
-import { useCharacterStore, useUIStore } from '../store'
+import { useCharacterStore, useSettingsStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import clsx from 'clsx'
 
@@ -18,9 +18,12 @@ const FIELD_LABELS = {
 export default function CharacterEditPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { createCharacter, updateCharacter } = useCharacterStore()
+  const { createCharacter, updateCharacter, fetchCharacter } = useCharacterStore()
   const { showToast } = useUIStore()
   const isNew = !id
+
+  // 表单字段白名单，避免混入 id/user_id/created_at 等非编辑字段
+  const FORM_FIELDS = ['name', 'description', 'personality', 'scenario', 'first_msg', 'avatar_url', 'tags', 'use_custom_user', 'user_name', 'user_detail']
 
   const [form, setForm] = useState({
     name: '', description: '', personality: '',
@@ -31,11 +34,13 @@ export default function CharacterEditPage() {
 
   useEffect(() => {
     if (!isNew) {
-      const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
-      const headers = token ? { 'Authorization': `Bearer ${token}` } : {}
-      fetch(`/api/characters/${id}`, { headers })
-        .then(r => r.json())
-        .then(data => setForm(data))
+      fetchCharacter(id)
+        .then(data => {
+          const cleaned = {}
+          FORM_FIELDS.forEach(k => { cleaned[k] = data[k] ?? '' })
+          cleaned.use_custom_user = !!data.use_custom_user
+          setForm(cleaned)
+        })
         .catch(() => { showToast('加载失败', 'error'); navigate('/characters') })
     }
   }, [id])
@@ -157,17 +162,11 @@ export default function CharacterEditPage() {
                     className="flex-1 input-base"
                   />
                   <button
-                    onClick={async () => {
-                      // 从全局设置获取默认用户信息
-                      try {
-                        const token = (() => { try { return JSON.parse(localStorage.getItem('litechat-auth'))?.state?.token } catch { return null } })()
-                        const headers = token ? { 'Authorization': `Bearer ${token}` } : {}
-                        const res = await fetch('/api/settings', { headers })
-                        const data = await res.json()
-                        if (data.default_user_name) {
-                          setForm(f => ({ ...f, user_name: data.default_user_name }))
-                        }
-                      } catch {}
+                    onClick={() => {
+                      const settings = useSettingsStore.getState().settings
+                      if (settings.default_user_name) {
+                        setForm(f => ({ ...f, user_name: settings.default_user_name }))
+                      }
                     }}
                     className="btn-ghost px-3 py-2 text-xs text-gray-400 hover:text-primary-300 border border-surface-border rounded-xl"
                   >
