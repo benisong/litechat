@@ -78,18 +78,31 @@ export default function UsersPage() {
     try {
       const token = useAuthStore.getState().token
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+      const nextUsername = selfForm.username.trim()
+      const usernameChanged = nextUsername !== currentUser.username
+      const wantsPasswordChange = !!selfForm.old_password || !!selfForm.new_password
+
+      if (!nextUsername) {
+        showToast('用户名不能为空', 'error')
+        return
+      }
+
+      if (wantsPasswordChange && (!selfForm.old_password || !selfForm.new_password)) {
+        showToast('修改密码需要填写当前密码和新密码', 'error')
+        return
+      }
 
       // 修改用户名（通过 admin 接口）
-      if (selfForm.username !== currentUser.username) {
+      if (usernameChanged) {
         const res = await fetch(`/api/auth/users/${currentUser.id}`, {
           method: 'PUT', headers,
-          body: JSON.stringify({ username: selfForm.username, role: 'admin' }),
+          body: JSON.stringify({ username: nextUsername }),
         })
         if (!res.ok) { const e = await res.json(); throw new Error(e.error) }
       }
 
       // 修改密码
-      if (selfForm.old_password && selfForm.new_password) {
+      if (wantsPasswordChange) {
         const res = await fetch('/api/auth/password', {
           method: 'PUT', headers,
           body: JSON.stringify({ old_password: selfForm.old_password, new_password: selfForm.new_password }),
@@ -101,7 +114,7 @@ export default function UsersPage() {
       setShowEditSelf(false)
 
       // 如果用户名或密码改了，需要重新登录
-      if (selfForm.username !== currentUser.username || selfForm.new_password) {
+      if (usernameChanged || wantsPasswordChange) {
         setTimeout(() => logout(), 1500)
       } else {
         fetchUsers()
