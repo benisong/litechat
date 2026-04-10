@@ -66,6 +66,23 @@ export default function ChatPage() {
     }
   }
 
+  const lastUserRequest = [...messages]
+    .reverse()
+    .find(msg => msg.role === 'user' && msg.content?.trim())?.content?.trim() || ''
+
+  // 重新发送最后一次用户请求（用于模型无返回时快速重试）
+  const handleRetryLastRequest = async () => {
+    if (!lastUserRequest) {
+      showToast('暂无可重发的上一条请求', 'error')
+      return
+    }
+    try {
+      await sendMessage(chatId, lastUserRequest)
+    } catch (err) {
+      showToast(err.message || '重新发送失败', 'error')
+    }
+  }
+
   // 重新生成 AI 回复：后端自动读取上一条用户消息重新请求
   const handleRegenerate = async () => {
     try {
@@ -153,7 +170,12 @@ export default function ChatPage() {
       </div>
 
       {/* 输入框 */}
-      <ChatInput onSend={handleSend} disabled={streaming} />
+      <ChatInput
+        onSend={handleSend}
+        onRetryLast={handleRetryLastRequest}
+        retryDisabled={!lastUserRequest}
+        disabled={streaming}
+      />
 
       {/* 菜单弹窗 */}
       <Modal open={showMenu} onClose={() => setShowMenu(false)} title="对话操作">
