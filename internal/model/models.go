@@ -148,11 +148,12 @@ type SendMessageRequest struct {
 
 // GenerateCharacterCardRequest 模板生成角色卡请求
 type GenerateCharacterCardRequest struct {
-	Gender      string `json:"gender" binding:"required"`
-	Setting     string `json:"setting" binding:"required"`
-	Type        string `json:"type" binding:"required"`
-	Personality string `json:"personality" binding:"required"`
-	POV         string `json:"pov" binding:"required"`
+	Gender            string `json:"gender" binding:"required"`
+	Setting           string `json:"setting" binding:"required"`
+	Type              string `json:"type" binding:"required"`
+	Personality       string `json:"personality" binding:"required"`
+	POV               string `json:"pov" binding:"required"`
+	CustomPersonality string `json:"custom_personality"`
 }
 
 // GenerateCharacterCardResponse 模板生成角色卡响应
