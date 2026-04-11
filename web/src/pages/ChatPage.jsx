@@ -66,13 +66,17 @@ export default function ChatPage() {
     }
   }
 
-  const retryMessageId = !streaming && messages.length > 0 && messages[messages.length - 1].role === 'user'
-    ? messages[messages.length - 1].id
+  const latestUserMessageId = !streaming
+    ? [...messages].reverse().find(msg => msg.role === 'user')?.id || null
+    : null
+
+  const latestAssistantMessageId = !streaming
+    ? [...messages].reverse().find(msg => msg.role === 'assistant')?.id || null
     : null
 
   // 重新发送最后一次用户请求（用于模型无返回时快速重试）
   const handleRetryLastRequest = async () => {
-    if (!retryMessageId) {
+    if (!latestUserMessageId) {
       showToast('暂无可重发的上一条请求', 'error')
       return
     }
@@ -161,8 +165,8 @@ export default function ChatPage() {
             key={msg.id}
             message={msg}
             character={character}
-            onRegenerate={msg.role === 'assistant' ? handleRegenerate : undefined}
-            onRetry={msg.id === retryMessageId ? handleRetryLastRequest : undefined}
+            onRegenerate={msg.id === latestAssistantMessageId ? handleRegenerate : undefined}
+            onRetry={msg.id === latestUserMessageId ? handleRetryLastRequest : undefined}
             onDeleteCascade={(msgId) => deleteMessageCascade(chatId, msgId)}
           />
         ))}
