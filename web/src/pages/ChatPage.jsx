@@ -153,6 +153,7 @@ export default function ChatPage() {
 
   // Keep the synthetic opening message visible during the first round-trip.
   const hasPersistedMessages = messages.some(msg => !String(msg.id || '').startsWith('temp-'))
+  const showOpeningScene = !loading && character?.scenario && !hasPersistedMessages
   const showFirstMsg = !loading && character?.first_msg && !hasPersistedMessages
 
   return (
@@ -184,6 +185,19 @@ export default function ChatPage() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-4 space-y-4">
+        {showOpeningScene && (
+          <div className="px-4 message-enter">
+            <div className="mx-auto max-w-2xl rounded-2xl border border-surface-border bg-surface/50 px-4 py-3 text-center">
+              <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-gray-500">
+                场景设定
+              </p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-300">
+                {character.scenario}
+              </p>
+            </div>
+          </div>
+        )}
+
         {showFirstMsg && (
           <div className="flex gap-2.5 px-4 message-enter">
             <Avatar name={character.name} src={character.avatar_url} size="sm" className="mt-0.5" />
