@@ -448,7 +448,7 @@ export default function SettingsPage() {
           </section>
         )}
 
-        <UserInfoSection />
+        {!isAdmin && <UserInfoSection />}
 
         <section>
           <h2 className="text-xs text-gray-400 font-medium uppercase tracking-wider mb-3 px-1">外观</h2>

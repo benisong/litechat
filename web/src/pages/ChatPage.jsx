@@ -1,19 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, MoreVertical, Trash2, RefreshCw } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ChevronLeft, MoreVertical, RefreshCw, Trash2 } from 'lucide-react'
 import { useChatStore, useCharacterStore, useUIStore } from '../store'
 import MessageBubble from '../components/chat/MessageBubble'
 import ChatInput from '../components/chat/ChatInput'
 import Avatar from '../components/ui/Avatar'
 import Modal from '../components/ui/Modal'
 
+function getAuthHeaders() {
+  try {
+    const stored = localStorage.getItem('litechat-auth')
+    const token = stored ? JSON.parse(stored)?.state?.token : null
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  } catch {
+    return {}
+  }
+}
+
 export default function ChatPage() {
   const { chatId } = useParams()
   const navigate = useNavigate()
   const { showToast } = useUIStore()
 
-  const { currentChat, messages, streaming, fetchMessages, sendMessage, deleteChat, deleteMessageCascade, regenerate } = useChatStore()
-  const { characters } = useCharacterStore()
+  const {
+    messages,
+    loading,
+    streaming,
+    fetchMessages,
+    sendMessage,
+    deleteChat,
+    deleteMessageCascade,
+    regenerate,
+  } = useChatStore()
 
   const [chat, setChat] = useState(null)
   const [character, setCharacter] = useState(null)
@@ -26,30 +44,30 @@ export default function ChatPage() {
   }
 
   useEffect(() => {
-    // 加载对话信息（带认证 header）
-    const getAuthHeaders = () => {
-      try {
-        const stored = localStorage.getItem('litechat-auth')
-        const token = stored ? JSON.parse(stored)?.state?.token : null
-        return token ? { 'Authorization': `Bearer ${token}` } : {}
-      } catch { return {} }
-    }
-
     const loadChat = async () => {
       const headers = getAuthHeaders()
       const res = await fetch(`/api/chats/${chatId}`, { headers })
-      if (!res.ok) { navigate('/chats'); return }
+      if (!res.ok) {
+        navigate('/chats')
+        return
+      }
+
       const data = await res.json()
       setChat(data)
 
-      // 查找角色
-      const chars = useCharacterStore.getState().characters
-      const char = chars.find(c => c.id === data.character_id)
-      if (char) {
-        setCharacter(char)
-      } else {
-        const r = await fetch(`/api/characters/${data.character_id}`, { headers })
-        if (r.ok) setCharacter(await r.json())
+      const cachedCharacter = useCharacterStore
+        .getState()
+        .characters
+        .find(item => item.id === data.character_id)
+
+      if (cachedCharacter) {
+        setCharacter(cachedCharacter)
+        return
+      }
+
+      const characterRes = await fetch(`/api/characters/${data.character_id}`, { headers })
+      if (characterRes.ok) {
+        setCharacter(await characterRes.json())
       }
     }
 
@@ -57,7 +75,6 @@ export default function ChatPage() {
     fetchMessages(chatId)
   }, [chatId])
 
-  // 自动滚动到底部
   useEffect(() => {
     scrollToBottom('smooth')
   }, [messages])
@@ -88,7 +105,7 @@ export default function ChatPage() {
     }
   }, [])
 
-  const handleSend = async (content) => {
+  const handleSend = async content => {
     try {
       await sendMessage(chatId, content)
     } catch (err) {
@@ -104,12 +121,12 @@ export default function ChatPage() {
     ? [...messages].reverse().find(msg => msg.role === 'assistant')?.id || null
     : null
 
-  // 重新发送最后一次用户请求（用于模型无返回时快速重试）
   const handleRetryLastRequest = async () => {
     if (!latestUserMessageId) {
-      showToast('暂无可重发的上一条请求', 'error')
+      showToast('暂无可重试的上一条请求', 'error')
       return
     }
+
     try {
       await regenerate(chatId)
     } catch (err) {
@@ -117,7 +134,6 @@ export default function ChatPage() {
     }
   }
 
-  // 重新生成 AI 回复：后端自动读取上一条用户消息重新请求
   const handleRegenerate = async () => {
     try {
       await regenerate(chatId)
@@ -135,18 +151,14 @@ export default function ChatPage() {
     }
   }
 
-  // 处理角色开场白（消息为空时展示）
-  const showFirstMsg = messages.length === 0 && character?.first_msg && !streaming
+  // Keep the synthetic opening message visible during the first round-trip.
+  const hasPersistedMessages = messages.some(msg => !String(msg.id || '').startsWith('temp-'))
+  const showFirstMsg = !loading && character?.first_msg && !hasPersistedMessages
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-dark-400">
-      {/* 顶部导航 */}
-      <div className="glass border-b border-surface-border px-4 flex items-center gap-3
-                      pt-[env(safe-area-inset-top)] h-[calc(56px+env(safe-area-inset-top))]">
-        <button
-          onClick={() => navigate('/chats')}
-          className="btn-ghost p-2 -ml-2"
-        >
+      <div className="glass border-b border-surface-border px-4 flex items-center gap-3 pt-[env(safe-area-inset-top)] h-[calc(56px+env(safe-area-inset-top))]">
+        <button onClick={() => navigate('/chats')} className="btn-ghost p-2 -ml-2">
           <ChevronLeft size={22} />
         </button>
 
@@ -156,27 +168,22 @@ export default function ChatPage() {
 
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold text-sm truncate">
-            {character?.name || chat?.title || '…'}
+            {character?.name || chat?.title || '...'}
           </h2>
           {streaming && (
             <span className="text-xs text-primary-400 flex items-center gap-1">
               <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-pulse" />
-              正在输入…
+              正在输入...
             </span>
           )}
         </div>
 
-        <button
-          onClick={() => setShowMenu(true)}
-          className="btn-ghost p-2 -mr-2"
-        >
+        <button onClick={() => setShowMenu(true)} className="btn-ghost p-2 -mr-2">
           <MoreVertical size={20} />
         </button>
       </div>
 
-      {/* 消息列表 */}
       <div className="min-h-0 flex-1 overflow-y-auto py-4 space-y-4">
-        {/* 角色开场白 */}
         {showFirstMsg && (
           <div className="flex gap-2.5 px-4 message-enter">
             <Avatar name={character.name} src={character.avatar_url} size="sm" className="mt-0.5" />
@@ -189,7 +196,6 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* 消息列表 */}
         {messages.map(msg => (
           <MessageBubble
             key={msg.id}
@@ -197,31 +203,33 @@ export default function ChatPage() {
             character={character}
             onRegenerate={msg.id === latestAssistantMessageId ? handleRegenerate : undefined}
             onRetry={msg.id === latestUserMessageId ? handleRetryLastRequest : undefined}
-            onDeleteCascade={(msgId) => deleteMessageCascade(chatId, msgId)}
+            onDeleteCascade={msgId => deleteMessageCascade(chatId, msgId)}
           />
         ))}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入框 */}
       <ChatInput onSend={handleSend} disabled={streaming} />
 
-      {/* 菜单弹窗 */}
       <Modal open={showMenu} onClose={() => setShowMenu(false)} title="对话操作">
         <div className="space-y-2">
           <button
-            onClick={() => { setShowMenu(false); fetchMessages(chatId) }}
-            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-hover
-                       transition-colors text-left"
+            onClick={() => {
+              setShowMenu(false)
+              fetchMessages(chatId)
+            }}
+            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-surface-hover transition-colors text-left"
           >
             <RefreshCw size={18} className="text-gray-400" />
             <span>刷新消息</span>
           </button>
           <button
-            onClick={() => { setShowMenu(false); setShowDeleteConfirm(true) }}
-            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/10
-                       transition-colors text-left text-red-400"
+            onClick={() => {
+              setShowMenu(false)
+              setShowDeleteConfirm(true)
+            }}
+            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/10 transition-colors text-left text-red-400"
           >
             <Trash2 size={18} />
             <span>删除对话</span>
@@ -229,21 +237,20 @@ export default function ChatPage() {
         </div>
       </Modal>
 
-      {/* 删除确认弹窗 */}
       <Modal open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="删除对话">
-        <p className="text-gray-400 mb-6">确认删除这个对话吗？所有消息将被永久删除，无法恢复。</p>
+        <p className="text-gray-400 mb-6">
+          确认删除这个对话吗？所有消息将被永久删除，无法恢复。
+        </p>
         <div className="flex gap-3">
           <button
             onClick={() => setShowDeleteConfirm(false)}
-            className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
-                       hover:bg-surface-hover transition-colors"
+            className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300 hover:bg-surface-hover transition-colors"
           >
             取消
           </button>
           <button
             onClick={handleDeleteChat}
-            className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-400
-                       text-white font-medium transition-colors"
+            className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-400 text-white font-medium transition-colors"
           >
             删除
           </button>
