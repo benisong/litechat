@@ -21,6 +21,10 @@ export default function ChatPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const messagesEndRef = useRef(null)
 
+  const scrollToBottom = (behavior = 'auto') => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
+  }
+
   useEffect(() => {
     // 加载对话信息（带认证 header）
     const getAuthHeaders = () => {
@@ -55,8 +59,34 @@ export default function ChatPage() {
 
   // 自动滚动到底部
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    scrollToBottom('smooth')
   }, [messages])
+
+  useEffect(() => {
+    const restoreBottomActions = () => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollToBottom('auto')
+        })
+      })
+    }
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) restoreBottomActions()
+    }
+
+    window.addEventListener('focus', restoreBottomActions)
+    window.addEventListener('pageshow', restoreBottomActions)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.visualViewport?.addEventListener('resize', restoreBottomActions)
+
+    return () => {
+      window.removeEventListener('focus', restoreBottomActions)
+      window.removeEventListener('pageshow', restoreBottomActions)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.visualViewport?.removeEventListener('resize', restoreBottomActions)
+    }
+  }, [])
 
   const handleSend = async (content) => {
     try {
@@ -109,7 +139,7 @@ export default function ChatPage() {
   const showFirstMsg = messages.length === 0 && character?.first_msg && !streaming
 
   return (
-    <div className="flex flex-col h-dvh bg-dark-400">
+    <div className="flex h-full min-h-0 flex-col bg-dark-400">
       {/* 顶部导航 */}
       <div className="glass border-b border-surface-border px-4 flex items-center gap-3
                       pt-[env(safe-area-inset-top)] h-[calc(56px+env(safe-area-inset-top))]">
@@ -145,7 +175,7 @@ export default function ChatPage() {
       </div>
 
       {/* 消息列表 */}
-      <div className="flex-1 overflow-y-auto py-4 space-y-4">
+      <div className="min-h-0 flex-1 overflow-y-auto py-4 space-y-4">
         {/* 角色开场白 */}
         {showFirstMsg && (
           <div className="flex gap-2.5 px-4 message-enter">

@@ -25,8 +25,8 @@ export default function Layout() {
   const isChatDetail = /^\/chats\/.+/.test(location.pathname)
 
   return (
-    <div className="flex flex-col h-dvh max-w-lg mx-auto relative">
-      <main className={clsx('flex-1 overflow-hidden', !isChatDetail && 'pb-16')}>
+    <div className="flex min-h-0 flex-col h-dvh max-w-lg mx-auto relative">
+      <main className={clsx('min-h-0 flex-1 overflow-hidden', !isChatDetail && 'pb-16')}>
         <Outlet />
       </main>
 
