@@ -4,6 +4,15 @@ import { persist } from 'zustand/middleware'
 // ===== API 工具函数 =====
 const BASE = '/api'
 
+const DEFAULT_SETTINGS = {
+  api_endpoint: 'https://api.openai.com/v1',
+  api_key: '',
+  default_model: 'gpt-4o-mini',
+  use_default_model_for_character_card: true,
+  character_card_model: '',
+  theme: 'dark',
+}
+
 // 从 zustand persist 读取 token
 function getToken() {
   try {
@@ -123,6 +132,14 @@ export const useCharacterStore = create((set, get) => ({
     const data = await apiFetch('/characters', { method: 'POST', body: char })
     set(s => ({ characters: [data, ...s.characters] }))
     return data
+  },
+
+  generateCharacterCard: async (choices) => {
+    const data = await apiFetch('/characters/generate', {
+      method: 'POST',
+      body: choices,
+    })
+    return data?.draft || data
   },
 
   updateCharacter: async (id, char) => {
@@ -460,12 +477,7 @@ export const useWorldBookStore = create((set) => ({
 export const useSettingsStore = create(
   persist(
     (set, get) => ({
-      settings: {
-        api_endpoint: 'https://api.openai.com/v1',
-        api_key: '',
-        default_model: 'gpt-4o-mini',
-        theme: 'dark',
-      },
+      settings: { ...DEFAULT_SETTINGS },
       loaded: false,
 
       fetchSettings: async () => {
@@ -474,7 +486,7 @@ export const useSettingsStore = create(
           // 主题用本地存储的值，不被后端覆盖
           const localTheme = localStorage.getItem('litechat-theme')
           if (localTheme) data.theme = localTheme
-          set({ settings: data, loaded: true })
+          set({ settings: { ...DEFAULT_SETTINGS, ...get().settings, ...data }, loaded: true })
           // 同步主题到 DOM
           const theme = data.theme || 'dark'
           document.documentElement.className = theme

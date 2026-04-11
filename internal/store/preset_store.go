@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"litechat/internal/model"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -385,7 +386,9 @@ func (s *ConfigStore) Set(key, value string) error {
 }
 
 func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
-	settings := &model.AppSettings{}
+	settings := &model.AppSettings{
+		UseDefaultModelForCharacterCard: true,
+	}
 	rows, err := s.db.Query(`SELECT key, value FROM configs`)
 	if err != nil {
 		return nil, err
@@ -404,6 +407,13 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			settings.APIKey = v
 		case "default_model":
 			settings.DefaultModel = v
+		case "use_default_model_for_character_card":
+			parsed, err := strconv.ParseBool(v)
+			if err == nil {
+				settings.UseDefaultModelForCharacterCard = parsed
+			}
+		case "character_card_model":
+			settings.CharacterCardModel = v
 		case "theme":
 			settings.Theme = v
 		case "service_mode":

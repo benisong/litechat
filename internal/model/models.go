@@ -7,29 +7,42 @@ type Character struct {
 	ID            string    `json:"id" db:"id"`
 	UserID        string    `json:"user_id" db:"user_id"`
 	Name          string    `json:"name" db:"name"`
-	Description   string    `json:"description" db:"description"`       // 角色描述
-	Personality   string    `json:"personality" db:"personality"`       // 性格设定
-	Scenario      string    `json:"scenario" db:"scenario"`             // 场景设定
-	FirstMsg      string    `json:"first_msg" db:"first_msg"`           // 开场白
-	AvatarURL     string    `json:"avatar_url" db:"avatar_url"`         // 头像URL
-	Tags          string    `json:"tags" db:"tags"`                     // 标签，逗号分隔
-	UseCustomUser bool      `json:"use_custom_user" db:"use_custom_user"` // 是否使用自定义用户信息
-	UserName      string    `json:"user_name" db:"user_name"`           // 自定义用户名称
-	UserDetail    string    `json:"user_detail" db:"user_detail"`       // 自定义用户详情
+	Description   string    `json:"description" db:"description"`
+	Personality   string    `json:"personality" db:"personality"`
+	Scenario      string    `json:"scenario" db:"scenario"`
+	FirstMsg      string    `json:"first_msg" db:"first_msg"`
+	AvatarURL     string    `json:"avatar_url" db:"avatar_url"`
+	Tags          string    `json:"tags" db:"tags"`
+	UseCustomUser bool      `json:"use_custom_user" db:"use_custom_user"`
+	UserName      string    `json:"user_name" db:"user_name"`
+	UserDetail    string    `json:"user_detail" db:"user_detail"`
 	CreatedAt     time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// CharacterDraft 角色卡草稿
+type CharacterDraft struct {
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Personality   string `json:"personality"`
+	Scenario      string `json:"scenario"`
+	FirstMsg      string `json:"first_msg"`
+	AvatarURL     string `json:"avatar_url"`
+	Tags          string `json:"tags"`
+	UseCustomUser bool   `json:"use_custom_user"`
+	UserName      string `json:"user_name"`
+	UserDetail    string `json:"user_detail"`
+}
+
 // Chat 对话会话模型
 type Chat struct {
-	ID          string    `json:"id" db:"id"`
-	UserID      string    `json:"user_id" db:"user_id"`
-	CharacterID string    `json:"character_id" db:"character_id"`
-	Title       string    `json:"title" db:"title"`
-	PresetID    string    `json:"preset_id" db:"preset_id"`   // 使用的预设ID
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
-	// 关联数据（非数据库字段）
+	ID          string     `json:"id" db:"id"`
+	UserID      string     `json:"user_id" db:"user_id"`
+	CharacterID string     `json:"character_id" db:"character_id"`
+	Title       string     `json:"title" db:"title"`
+	PresetID    string     `json:"preset_id" db:"preset_id"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
 	Character   *Character `json:"character,omitempty" db:"-"`
 	LastMessage string     `json:"last_message,omitempty" db:"-"`
 	MsgCount    int        `json:"msg_count,omitempty" db:"-"`
@@ -39,9 +52,9 @@ type Chat struct {
 type Message struct {
 	ID        string    `json:"id" db:"id"`
 	ChatID    string    `json:"chat_id" db:"chat_id"`
-	Role      string    `json:"role" db:"role"`       // user / assistant / system
+	Role      string    `json:"role" db:"role"`
 	Content   string    `json:"content" db:"content"`
-	Tokens    int       `json:"tokens" db:"tokens"`   // token 计数
+	Tokens    int       `json:"tokens" db:"tokens"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
@@ -50,8 +63,8 @@ type Preset struct {
 	ID           string    `json:"id" db:"id"`
 	UserID       string    `json:"user_id" db:"user_id"`
 	Name         string    `json:"name" db:"name"`
-	SystemPrompt string    `json:"system_prompt" db:"system_prompt"` // 简单模式：单段系统提示词
-	Prompts      string    `json:"prompts" db:"prompts"`             // 高级模式：多段提示词 JSON 数组
+	SystemPrompt string    `json:"system_prompt" db:"system_prompt"`
+	Prompts      string    `json:"prompts" db:"prompts"`
 	Temperature  float64   `json:"temperature" db:"temperature"`
 	MaxTokens    int       `json:"max_tokens" db:"max_tokens"`
 	TopP         float64   `json:"top_p" db:"top_p"`
@@ -60,50 +73,49 @@ type Preset struct {
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// PromptEntry 多段提示词中的单个条目（SillyTavern 兼容格式）
+// PromptEntry 多段提示词中的单个条目
 type PromptEntry struct {
-	ID             string `json:"id"`                       // 唯一标识
-	Name           string `json:"name"`                     // 显示名称
-	Content        string `json:"content"`                  // 提示词内容（支持 {{char}} 等变量）
-	Role           string `json:"role"`                     // system / user / assistant
-	Enabled        bool   `json:"enabled"`                  // 是否启用
-	SystemPrompt   bool   `json:"system_prompt"`            // true=合并到系统提示词区域，false=放在聊天历史之后
-	InjectionPos   int    `json:"injection_position"`       // 0=相对末尾(默认), 1=绝对位置
-	InjectionDepth int    `json:"injection_depth"`          // 注入深度
-	Order          int    `json:"order"`                    // 排序优先级
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Content        string `json:"content"`
+	Role           string `json:"role"`
+	Enabled        bool   `json:"enabled"`
+	SystemPrompt   bool   `json:"system_prompt"`
+	InjectionPos   int    `json:"injection_position"`
+	InjectionDepth int    `json:"injection_depth"`
+	Order          int    `json:"order"`
 }
 
 // WorldBook 世界书（知识库）
 type WorldBook struct {
-	ID          string    `json:"id" db:"id"`
-	UserID      string    `json:"user_id" db:"user_id"`
-	CharacterID string    `json:"character_id" db:"character_id"` // 空=全局，有值=绑定角色
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
-	// 关联数据（非数据库字段）
+	ID            string           `json:"id" db:"id"`
+	UserID        string           `json:"user_id" db:"user_id"`
+	CharacterID   string           `json:"character_id" db:"character_id"`
+	Name          string           `json:"name" db:"name"`
+	Description   string           `json:"description" db:"description"`
+	CreatedAt     time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at" db:"updated_at"`
 	Entries       []WorldBookEntry `json:"entries,omitempty" db:"-"`
 	CharacterName string           `json:"character_name,omitempty" db:"-"`
 }
 
-// WorldBookEntry 世界书条目（SillyTavern Lorebook 兼容）
+// WorldBookEntry 世界书条目
 type WorldBookEntry struct {
 	ID             string    `json:"id" db:"id"`
 	UserID         string    `json:"user_id" db:"user_id"`
 	WorldBookID    string    `json:"world_book_id" db:"world_book_id"`
-	Keys           string    `json:"keys" db:"keys"`                     // 主关键词，逗号分隔（OR 逻辑）
-	SecondaryKeys  string    `json:"secondary_keys" db:"secondary_keys"` // 次关键词，逗号分隔（AND 逻辑，需同时命中）
-	Content        string    `json:"content" db:"content"`               // 注入内容
-	Enabled        bool      `json:"enabled" db:"enabled"`               // 是否启用
-	Constant       bool      `json:"constant" db:"constant"`             // 常驻注入（不需要关键词触发）
-	Priority       int       `json:"priority" db:"priority"`             // 优先级（数值越大越优先）
-	InjectionPos   int       `json:"injection_position" db:"injection_position"` // 0=相对末尾, 1=绝对位置
-	InjectionDepth int       `json:"injection_depth" db:"injection_depth"`       // 注入深度
-	ScanDepth      int       `json:"scan_depth" db:"scan_depth"`         // 扫描深度（往回扫描几条消息，0=全部）
-	CaseSensitive  bool      `json:"case_sensitive" db:"case_sensitive"` // 关键词大小写敏感
-	Order          int       `json:"order" db:"order_num"`               // 同深度排序
-	Role           string    `json:"role" db:"role"`                     // 注入角色 system/user/assistant
+	Keys           string    `json:"keys" db:"keys"`
+	SecondaryKeys  string    `json:"secondary_keys" db:"secondary_keys"`
+	Content        string    `json:"content" db:"content"`
+	Enabled        bool      `json:"enabled" db:"enabled"`
+	Constant       bool      `json:"constant" db:"constant"`
+	Priority       int       `json:"priority" db:"priority"`
+	InjectionPos   int       `json:"injection_position" db:"injection_position"`
+	InjectionDepth int       `json:"injection_depth" db:"injection_depth"`
+	ScanDepth      int       `json:"scan_depth" db:"scan_depth"`
+	CaseSensitive  bool      `json:"case_sensitive" db:"case_sensitive"`
+	Order          int       `json:"order" db:"order_num"`
+	Role           string    `json:"role" db:"role"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
@@ -115,21 +127,37 @@ type Config struct {
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// AppSettings 应用设置（聚合配置）
+// AppSettings 应用设置
 type AppSettings struct {
-	APIEndpoint     string `json:"api_endpoint"`      // OpenAI 兼容 API 地址
-	APIKey          string `json:"api_key"`           // API 密钥
-	DefaultModel    string `json:"default_model"`     // 默认模型
-	Theme           string `json:"theme"`             // light / dark
-	ServiceMode     string `json:"service_mode"`      // self=自用模式, service=服务模式
-	DefaultUserName string `json:"default_user_name"` // 默认用户名称
-	DefaultUserDetail string `json:"default_user_detail"` // 默认用户详情
+	APIEndpoint                     string `json:"api_endpoint"`
+	APIKey                          string `json:"api_key"`
+	DefaultModel                    string `json:"default_model"`
+	UseDefaultModelForCharacterCard bool   `json:"use_default_model_for_character_card"`
+	CharacterCardModel              string `json:"character_card_model"`
+	Theme                           string `json:"theme"`
+	ServiceMode                     string `json:"service_mode"`
+	DefaultUserName                 string `json:"default_user_name"`
+	DefaultUserDetail               string `json:"default_user_detail"`
 }
 
 // SendMessageRequest 发送消息请求
 type SendMessageRequest struct {
-	Content     string `json:"content" binding:"required"`
-	PresetID    string `json:"preset_id"`
+	Content  string `json:"content" binding:"required"`
+	PresetID string `json:"preset_id"`
+}
+
+// GenerateCharacterCardRequest 模板生成角色卡请求
+type GenerateCharacterCardRequest struct {
+	Gender      string `json:"gender" binding:"required"`
+	Setting     string `json:"setting" binding:"required"`
+	Type        string `json:"type" binding:"required"`
+	Personality string `json:"personality" binding:"required"`
+	POV         string `json:"pov" binding:"required"`
+}
+
+// GenerateCharacterCardResponse 模板生成角色卡响应
+type GenerateCharacterCardResponse struct {
+	Draft CharacterDraft `json:"draft"`
 }
 
 // ChatCompletionMessage OpenAI 兼容消息格式

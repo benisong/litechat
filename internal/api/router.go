@@ -38,6 +38,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		// 角色卡
 		api.GET("/characters", h.ListCharacters)
 		api.POST("/characters", h.CreateCharacter)
+		api.POST("/characters/generate", h.GenerateCharacterCard)
 		api.GET("/characters/:id", h.GetCharacter)
 		api.PUT("/characters/:id", h.UpdateCharacter)
 		api.DELETE("/characters/:id", h.DeleteCharacter)
@@ -48,8 +49,8 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.GET("/chats/:id", h.GetChat)
 		api.DELETE("/chats/:id", h.DeleteChat)
 		api.GET("/chats/:id/messages", h.GetMessages)
-		api.POST("/chats/:id/messages", h.SendMessage)          // SSE 流式
-		api.POST("/chats/:id/regenerate", h.RegenerateMessage)   // 重新生成
+		api.POST("/chats/:id/messages", h.SendMessage)                   // SSE 流式
+		api.POST("/chats/:id/regenerate", h.RegenerateMessage)           // 重新生成
 		api.DELETE("/chats/:id/messages/:msgId", h.DeleteMessageCascade) // 级联删除
 
 		// 消息

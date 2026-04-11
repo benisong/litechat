@@ -319,6 +319,23 @@ func (h *Handlers) CreateCharacter(c *gin.Context) {
 	c.JSON(http.StatusCreated, char)
 }
 
+// GenerateCharacterCard POST /api/characters/generate
+func (h *Handlers) GenerateCharacterCard(c *gin.Context) {
+	var req model.GenerateCharacterCardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	draft, err := h.chatService.GenerateCharacterCardDraft(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, model.GenerateCharacterCardResponse{Draft: *draft})
+}
+
 // UpdateCharacter PUT /api/characters/:id
 func (h *Handlers) UpdateCharacter(c *gin.Context) {
 	userID := GetUserID(c)
@@ -775,7 +792,9 @@ func (h *Handlers) GetSettings(c *gin.Context) {
 
 // UpdateSettings PUT /api/settings
 func (h *Handlers) UpdateSettings(c *gin.Context) {
-	var settings model.AppSettings
+	settings := model.AppSettings{
+		UseDefaultModelForCharacterCard: true,
+	}
 	if err := c.ShouldBindJSON(&settings); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -792,6 +811,8 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	if settings.DefaultModel != "" {
 		h.configStore.Set("default_model", settings.DefaultModel)
 	}
+	h.configStore.Set("use_default_model_for_character_card", fmt.Sprintf("%t", settings.UseDefaultModelForCharacterCard))
+	h.configStore.Set("character_card_model", settings.CharacterCardModel)
 	if settings.Theme != "" {
 		h.configStore.Set("theme", settings.Theme)
 	}
