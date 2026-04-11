@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, RefreshCw } from 'lucide-react'
+import { Send, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 
 const INPUT_TOOLS = [
@@ -8,7 +8,7 @@ const INPUT_TOOLS = [
   { key: 'paren', label: '\uFF08\uFF09', open: '\uFF08', close: '\uFF09' },
 ]
 
-export default function ChatInput({ onSend, onRetryLast, disabled, retryDisabled }) {
+export default function ChatInput({ onSend, disabled }) {
   const [text, setText] = useState('')
   const [activeTool, setActiveTool] = useState('colon')
   const textareaRef = useRef(null)
@@ -136,24 +136,6 @@ export default function ChatInput({ onSend, onRetryLast, disabled, retryDisabled
         </button>
       </div>
 
-      {onRetryLast && (
-        <div className="mt-2 flex justify-end">
-          <button
-            onClick={onRetryLast}
-            disabled={disabled || retryDisabled}
-            className={clsx(
-              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs',
-              'border transition-all duration-150 active:scale-95',
-              !disabled && !retryDisabled
-                ? 'border-surface-border text-gray-300 hover:bg-surface-hover'
-                : 'border-surface-border text-gray-600 opacity-60 cursor-not-allowed'
-            )}
-          >
-            <RefreshCw size={13} />
-            <span>重新生成</span>
-          </button>
-        </div>
-      )}
     </div>
   )
 }

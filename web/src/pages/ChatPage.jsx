@@ -66,18 +66,18 @@ export default function ChatPage() {
     }
   }
 
-  const lastUserRequest = [...messages]
-    .reverse()
-    .find(msg => msg.role === 'user' && msg.content?.trim())?.content?.trim() || ''
+  const retryMessageId = !streaming && messages.length > 0 && messages[messages.length - 1].role === 'user'
+    ? messages[messages.length - 1].id
+    : null
 
   // 重新发送最后一次用户请求（用于模型无返回时快速重试）
   const handleRetryLastRequest = async () => {
-    if (!lastUserRequest) {
+    if (!retryMessageId) {
       showToast('暂无可重发的上一条请求', 'error')
       return
     }
     try {
-      await sendMessage(chatId, lastUserRequest)
+      await regenerate(chatId)
     } catch (err) {
       showToast(err.message || '重新发送失败', 'error')
     }
@@ -162,6 +162,7 @@ export default function ChatPage() {
             message={msg}
             character={character}
             onRegenerate={msg.role === 'assistant' ? handleRegenerate : undefined}
+            onRetry={msg.id === retryMessageId ? handleRetryLastRequest : undefined}
             onDeleteCascade={(msgId) => deleteMessageCascade(chatId, msgId)}
           />
         ))}
@@ -170,12 +171,7 @@ export default function ChatPage() {
       </div>
 
       {/* 输入框 */}
-      <ChatInput
-        onSend={handleSend}
-        onRetryLast={handleRetryLastRequest}
-        retryDisabled={!lastUserRequest}
-        disabled={streaming}
-      />
+      <ChatInput onSend={handleSend} disabled={streaming} />
 
       {/* 菜单弹窗 */}
       <Modal open={showMenu} onClose={() => setShowMenu(false)} title="对话操作">

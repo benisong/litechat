@@ -283,6 +283,72 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 }
 
 // loadPreset 加载预设（提取公共逻辑）
+// RetryLastOrRegenerate 鏀寔鎵炬渶鍚庝竴娆＄敤鎴疯姹傞噸璇曪紝鎴栧鏈€鍚庝竴鏉?AI 鍥炲閲嶆柊鐢熸垚
+func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback StreamCallback) (string, error) {
+	allMessages, err := s.messageStore.ListByChatID(chatID)
+	if err != nil {
+		return "", fmt.Errorf("鑾峰彇娑堟伅澶辫触: %w", err)
+	}
+	if len(allMessages) == 0 {
+		return "", fmt.Errorf("娌℃湁娑堟伅鍙互閲嶆柊鐢熸垚")
+	}
+
+	lastMessage := allMessages[len(allMessages)-1]
+	if lastMessage.Role == "assistant" {
+		return s.Regenerate(chatID, userID, callback)
+	}
+	if lastMessage.Role != "user" {
+		return "", fmt.Errorf("鎵句笉鍒板彲閲嶈瘯鐨勭敤鎴锋秷鎭?")
+	}
+
+	lastUserContent := lastMessage.Content
+
+	chat, err := s.chatStore.GetByID(chatID, userID)
+	if err != nil {
+		return "", fmt.Errorf("瀵硅瘽涓嶅瓨鍦? %w", err)
+	}
+
+	character, err := s.characterStore.GetByID(chat.CharacterID, userID)
+	if err != nil {
+		return "", fmt.Errorf("瑙掕壊涓嶅瓨鍦? %w", err)
+	}
+
+	preset := s.loadPreset(chat.PresetID, "", userID)
+
+	history, err := s.messageStore.ListByChatID(chatID)
+	if err != nil {
+		return "", fmt.Errorf("鑾峰彇娑堟伅鍘嗗彶澶辫触: %w", err)
+	}
+	if len(history) > 0 && history[len(history)-1].Role == "user" {
+		history = history[:len(history)-1]
+	}
+
+	messages := s.buildMessages(preset, character, history, lastUserContent, userID)
+
+	settings, err := s.configStore.GetSettings()
+	if err != nil {
+		return "", fmt.Errorf("鑾峰彇閰嶇疆澶辫触: %w", err)
+	}
+
+	fullResponse, err := s.callOpenAIStream(settings, preset, messages, callback)
+	s.debugLogResponse(chatID, fullResponse, err)
+	if err != nil {
+		return "", err
+	}
+
+	aiMsg := &model.Message{
+		ChatID:  chatID,
+		Role:    "assistant",
+		Content: fullResponse,
+	}
+	if err := s.messageStore.Create(aiMsg); err != nil {
+		return "", fmt.Errorf("淇濆瓨 AI 娑堟伅澶辫触: %w", err)
+	}
+
+	_ = s.chatStore.Touch(chatID, userID)
+	return fullResponse, nil
+}
+
 func (s *ChatService) loadPreset(chatPresetID, requestPresetID, userID string) *model.Preset {
 	presetIDToUse := requestPresetID
 	if presetIDToUse == "" {

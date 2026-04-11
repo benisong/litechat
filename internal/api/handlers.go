@@ -553,7 +553,7 @@ func (h *Handlers) RegenerateMessage(c *gin.Context) {
 		return nil
 	}
 
-	_, err := h.chatService.Regenerate(chatID, userID, callback)
+	_, err := h.chatService.RetryLastOrRegenerate(chatID, userID, callback)
 	if err != nil {
 		fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()

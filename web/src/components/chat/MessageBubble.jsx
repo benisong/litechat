@@ -5,7 +5,7 @@ import MessageContent from './MessageContent'
 import Modal from '../ui/Modal'
 import { Trash2, Copy, Check, RefreshCw } from 'lucide-react'
 
-export default function MessageBubble({ message, character, onRegenerate, onDeleteCascade }) {
+export default function MessageBubble({ message, character, onRegenerate, onRetry, onDeleteCascade }) {
   const [copied, setCopied] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
@@ -77,6 +77,15 @@ export default function MessageBubble({ message, character, onRegenerate, onDele
 
               {!isUser && onRegenerate && !isTemp && (
                 <button onClick={(e) => { e.stopPropagation(); onRegenerate() }}
+                  title="重新生成"
+                  className="p-1 rounded-md text-gray-500 hover:text-gray-300 transition-colors">
+                  <RefreshCw size={13} />
+                </button>
+              )}
+
+              {isUser && onRetry && (
+                <button onClick={(e) => { e.stopPropagation(); onRetry() }}
+                  title="重新生成"
                   className="p-1 rounded-md text-gray-500 hover:text-gray-300 transition-colors">
                   <RefreshCw size={13} />
                 </button>
