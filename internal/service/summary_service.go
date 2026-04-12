@@ -92,8 +92,11 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 		return "", history
 	}
 
-	bigSummary, _ := s.summaryStore.GetActiveBigChunk(chatID)
-	smallSummaries, _ := s.summaryStore.ListActiveSmallChunks(chatID)
+	bigSummary, smallSummaries, coverageTo, err := s.resolveUsableSummaryCoverage(chatID, state.AppliedCutoffSeq)
+	if err != nil {
+		log.Printf("[摘要] 解析可用摘要前缀失败 chat=%s: %v", chatID, err)
+		return "", history
+	}
 
 	var summaryBlocks []string
 	if bigSummary != nil {
@@ -106,11 +109,11 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 		return "", history
 	}
 
-	if state.AppliedCutoffSeq <= 0 {
+	if coverageTo <= 0 {
 		return strings.Join(summaryBlocks, "\n\n"), history
 	}
 
-	rawStartSeq := state.AppliedCutoffSeq - summaryRawOverlap + 1
+	rawStartSeq := coverageTo - summaryRawOverlap + 1
 	if rawStartSeq < 1 {
 		rawStartSeq = 1
 	}
@@ -123,6 +126,55 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 	}
 
 	return strings.Join(summaryBlocks, "\n\n"), filtered
+}
+
+func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq int) (*model.ChatSummaryChunk, []*model.ChatSummaryChunk, int, error) {
+	if maxToSeq <= 0 {
+		return nil, nil, 0, nil
+	}
+
+	bigChunk, err := s.summaryStore.GetLatestUsableBigChunk(chatID, maxToSeq)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if bigChunk != nil && bigChunk.FromSeq != 1 {
+		bigChunk = nil
+	}
+
+	smallChunks, err := s.summaryStore.ListUsableSmallChunks(chatID, maxToSeq)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	coverageTo := 0
+	if bigChunk != nil {
+		coverageTo = bigChunk.ToSeq
+	}
+
+	usableSmalls := make([]*model.ChatSummaryChunk, 0, len(smallChunks))
+	for _, chunk := range smallChunks {
+		switch {
+		case coverageTo == 0:
+			if chunk.FromSeq != 1 {
+				continue
+			}
+			usableSmalls = append(usableSmalls, chunk)
+			coverageTo = chunk.ToSeq
+		case chunk.ToSeq <= coverageTo:
+			continue
+		case chunk.FromSeq != coverageTo+1:
+			return bigChunk, usableSmalls, coverageTo, nil
+		default:
+			usableSmalls = append(usableSmalls, chunk)
+			coverageTo = chunk.ToSeq
+		}
+	}
+
+	if bigChunk == nil && len(usableSmalls) == 0 {
+		return nil, nil, 0, nil
+	}
+
+	return bigChunk, usableSmalls, coverageTo, nil
 }
 
 func (s *SummaryService) OnAssistantMessageStored(chatID string) {
@@ -148,24 +200,30 @@ func (s *SummaryService) InvalidateFromSeq(chatID string, fromSeq int) {
 	}
 
 	forceRebuild := state.AppliedCutoffSeq >= fromSeq
-	newCutoff := state.AppliedCutoffSeq
-	if newCutoff >= fromSeq {
-		newCutoff = fromSeq - 1
-		if newCutoff < 0 {
-			newCutoff = 0
-		}
-	}
-
-	if err := s.summaryStore.RollbackCutoff(chatID, newCutoff, fromSeq); err != nil {
-		log.Printf("[摘要] 回退 cutoff 失败 chat=%s: %v", chatID, err)
-		return
-	}
 	if err := s.summaryStore.MarkChunksDirtyFromSeq(chatID, fromSeq); err != nil {
 		log.Printf("[摘要] 标记 dirty 失败 chat=%s: %v", chatID, err)
 		return
 	}
 	if err := s.summaryStore.ResetCurrentBigSummaryIfDirty(chatID); err != nil {
 		log.Printf("[摘要] 清理大摘要指针失败 chat=%s: %v", chatID, err)
+		return
+	}
+
+	newCutoff := state.AppliedCutoffSeq
+	if forceRebuild {
+		_, _, recoveredCutoff, err := s.resolveUsableSummaryCoverage(chatID, fromSeq-1)
+		if err != nil {
+			log.Printf("[摘要] 回收可用摘要前缀失败 chat=%s: %v", chatID, err)
+			return
+		}
+		newCutoff = recoveredCutoff
+	}
+	if newCutoff < 0 {
+		newCutoff = 0
+	}
+
+	if err := s.summaryStore.RollbackCutoff(chatID, newCutoff, fromSeq); err != nil {
+		log.Printf("[摘要] 回退 cutoff 失败 chat=%s: %v", chatID, err)
 		return
 	}
 	if err := s.scheduleSmallIfNeeded(chatID, forceRebuild); err != nil {
@@ -321,13 +379,9 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 		return fmt.Errorf("stale: no messages in target range")
 	}
 
-	activeBig, _ := s.summaryStore.GetActiveBigChunk(job.ChatID)
-	activeSmalls, _ := s.summaryStore.ListActiveSmallChunks(job.ChatID)
-	precedingSmalls := make([]*model.ChatSummaryChunk, 0, len(activeSmalls))
-	for _, chunk := range activeSmalls {
-		if chunk.ToSeq < job.FromSeq {
-			precedingSmalls = append(precedingSmalls, chunk)
-		}
+	activeBig, precedingSmalls, _, err := s.resolveUsableSummaryCoverage(job.ChatID, job.FromSeq-1)
+	if err != nil {
+		return err
 	}
 	sourceFingerprint := summarySourceFingerprint(activeBig, precedingSmalls, rawMessages)
 
@@ -354,13 +408,9 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	if err != nil {
 		return err
 	}
-	currentActiveBig, _ := s.summaryStore.GetActiveBigChunk(job.ChatID)
-	currentActiveSmalls, _ := s.summaryStore.ListActiveSmallChunks(job.ChatID)
-	currentPrecedingSmalls := make([]*model.ChatSummaryChunk, 0, len(currentActiveSmalls))
-	for _, chunk := range currentActiveSmalls {
-		if chunk.ToSeq < job.FromSeq {
-			currentPrecedingSmalls = append(currentPrecedingSmalls, chunk)
-		}
+	currentActiveBig, currentPrecedingSmalls, _, err := s.resolveUsableSummaryCoverage(job.ChatID, job.FromSeq-1)
+	if err != nil {
+		return err
 	}
 	if summarySourceFingerprint(currentActiveBig, currentPrecedingSmalls, currentRawMessages) != sourceFingerprint {
 		return fmt.Errorf("stale: summary sources changed during generation")

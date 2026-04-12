@@ -108,22 +108,12 @@ func (s *SummaryStore) CreateChunk(chunk *model.ChatSummaryChunk) error {
 }
 
 func (s *SummaryStore) GetActiveBigChunk(chatID string) (*model.ChatSummaryChunk, error) {
-	chunk := &model.ChatSummaryChunk{}
-	var mergedInto sql.NullString
-	err := s.db.QueryRow(`
+	row := s.db.QueryRow(`
 		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'big' AND status = 'active'
-		ORDER BY to_seq DESC LIMIT 1`, chatID,
-	).Scan(&chunk.ID, &chunk.ChatID, &chunk.Level, &chunk.FromSeq, &chunk.ToSeq, &chunk.Content,
-		&chunk.Status, &mergedInto, &chunk.CreatedAt, &chunk.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	if mergedInto.Valid {
-		chunk.MergedIntoID = mergedInto.String
-	}
-	return chunk, nil
+		ORDER BY to_seq DESC LIMIT 1`, chatID)
+	return scanSummaryChunk(row)
 }
 
 func (s *SummaryStore) ListActiveSmallChunks(chatID string) ([]*model.ChatSummaryChunk, error) {
@@ -139,14 +129,48 @@ func (s *SummaryStore) ListActiveSmallChunks(chatID string) ([]*model.ChatSummar
 
 	var list []*model.ChatSummaryChunk
 	for rows.Next() {
-		chunk := &model.ChatSummaryChunk{}
-		var mergedInto sql.NullString
-		if err := rows.Scan(&chunk.ID, &chunk.ChatID, &chunk.Level, &chunk.FromSeq, &chunk.ToSeq, &chunk.Content,
-			&chunk.Status, &mergedInto, &chunk.CreatedAt, &chunk.UpdatedAt); err != nil {
+		chunk, err := scanSummaryChunk(rows)
+		if err != nil {
 			return nil, err
 		}
-		if mergedInto.Valid {
-			chunk.MergedIntoID = mergedInto.String
+		list = append(list, chunk)
+	}
+	return list, nil
+}
+
+func (s *SummaryStore) GetLatestUsableBigChunk(chatID string, maxToSeq int) (*model.ChatSummaryChunk, error) {
+	if maxToSeq <= 0 {
+		return nil, nil
+	}
+
+	row := s.db.QueryRow(`
+		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		FROM chat_summary_chunks
+		WHERE chat_id = ? AND level = 'big' AND status IN ('active', 'superseded') AND to_seq <= ?
+		ORDER BY to_seq DESC LIMIT 1`, chatID, maxToSeq)
+	return scanSummaryChunk(row)
+}
+
+func (s *SummaryStore) ListUsableSmallChunks(chatID string, maxToSeq int) ([]*model.ChatSummaryChunk, error) {
+	if maxToSeq <= 0 {
+		return nil, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		FROM chat_summary_chunks
+		WHERE chat_id = ? AND level = 'small' AND status IN ('active', 'merged') AND to_seq <= ?
+		ORDER BY from_seq ASC`, chatID, maxToSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*model.ChatSummaryChunk
+	for rows.Next() {
+		chunk, err := scanSummaryChunk(rows)
+		if err != nil {
+			return nil, err
 		}
 		list = append(list, chunk)
 	}
@@ -226,16 +250,16 @@ func (s *SummaryStore) ScheduleSmallJob(chatID string, fromSeq, toSeq, baseCutof
 	}
 
 	job := &model.ChatSummaryJob{
-		ID:           uuid.New().String(),
-		ChatID:       chatID,
-		JobType:      "small",
-		FromSeq:      fromSeq,
-		ToSeq:        toSeq,
+		ID:            uuid.New().String(),
+		ChatID:        chatID,
+		JobType:       "small",
+		FromSeq:       fromSeq,
+		ToSeq:         toSeq,
 		BaseCutoffSeq: baseCutoffSeq,
-		Status:       "pending",
-		NextRunAt:    now,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		Status:        "pending",
+		NextRunAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	_, err = s.db.Exec(`
@@ -329,4 +353,35 @@ func (s *SummaryStore) FailJob(jobID string, attemptCount int, nextRunAt time.Ti
 		SET status = 'failed', attempt_count = ?, next_run_at = ?, last_error = ?, updated_at = ?
 		WHERE id = ?`, attemptCount, nextRunAt, lastError, time.Now(), jobID)
 	return err
+}
+
+type summaryChunkScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSummaryChunk(scanner summaryChunkScanner) (*model.ChatSummaryChunk, error) {
+	chunk := &model.ChatSummaryChunk{}
+	var mergedInto sql.NullString
+	err := scanner.Scan(
+		&chunk.ID,
+		&chunk.ChatID,
+		&chunk.Level,
+		&chunk.FromSeq,
+		&chunk.ToSeq,
+		&chunk.Content,
+		&chunk.Status,
+		&mergedInto,
+		&chunk.CreatedAt,
+		&chunk.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if mergedInto.Valid {
+		chunk.MergedIntoID = mergedInto.String
+	}
+	return chunk, nil
 }
