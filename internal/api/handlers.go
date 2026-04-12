@@ -839,6 +839,7 @@ func (h *Handlers) GetSettings(c *gin.Context) {
 func (h *Handlers) UpdateSettings(c *gin.Context) {
 	settings := model.AppSettings{
 		UseDefaultModelForCharacterCard: true,
+		UseDefaultModelForMemory:        true,
 	}
 	if err := c.ShouldBindJSON(&settings); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -858,6 +859,8 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	}
 	h.configStore.Set("use_default_model_for_character_card", fmt.Sprintf("%t", settings.UseDefaultModelForCharacterCard))
 	h.configStore.Set("character_card_model", settings.CharacterCardModel)
+	h.configStore.Set("use_default_model_for_memory", fmt.Sprintf("%t", settings.UseDefaultModelForMemory))
+	h.configStore.Set("memory_model", settings.MemoryModel)
 	h.configStore.Set("memory_prompt_suffix", settings.MemoryPromptSuffix)
 	if settings.Theme != "" {
 		h.configStore.Set("theme", settings.Theme)

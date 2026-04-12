@@ -57,6 +57,9 @@ export default function SettingsPage() {
   const characterCardModelValue = form.use_default_model_for_character_card
     ? (form.default_model || '')
     : (form.character_card_model || form.default_model || '')
+  const memoryModelValue = form.use_default_model_for_memory !== false
+    ? (form.default_model || '')
+    : (form.memory_model || form.default_model || '')
 
   useEffect(() => {
     fetchSettings()
@@ -113,10 +116,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!isAdmin) return
-    if (form.use_default_model_for_character_card) return
+    if (form.use_default_model_for_character_card && form.use_default_model_for_memory !== false) return
     if (models.length > 0 || loadingModels) return
     handleFetchModels()
-  }, [isAdmin, form.use_default_model_for_character_card])
+  }, [isAdmin, form.use_default_model_for_character_card, form.use_default_model_for_memory])
 
   const handleSave = async () => {
     setSaving(true)
@@ -383,6 +386,58 @@ export default function SettingsPage() {
                           value={characterCardModelValue}
                           onChange={e => setForm(f => ({ ...f, character_card_model: e.target.value }))}
                           placeholder="先获取模型列表，或手动输入角色卡生成模型"
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {isAdmin && (
+                  <div className="space-y-3 rounded-xl border border-surface-border bg-surface/40 p-4">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={form.use_default_model_for_memory !== false}
+                        onChange={e => {
+                          const checked = e.target.checked
+                          setForm(f => ({
+                            ...f,
+                            use_default_model_for_memory: checked,
+                            memory_model: f.memory_model || f.default_model || '',
+                          }))
+                        }}
+                      />
+                      <div>
+                        <p className="text-sm text-gray-200">使用当前模型生成记忆存储摘要</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {form.use_default_model_for_memory !== false
+                            ? '记忆存储摘要将跟随当前默认模型，仅在 service 模式下生效'
+                            : '记忆存储摘要将使用独立模型，不影响聊天默认模型，仅在 service 模式下生效'}
+                        </p>
+                      </div>
+                    </label>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs text-gray-400">记忆存储摘要模型</label>
+                      {models.length > 0 ? (
+                        <select
+                          className="input-base w-full appearance-none bg-surface text-sm disabled:opacity-60"
+                          disabled={form.use_default_model_for_memory !== false}
+                          value={memoryModelValue}
+                          onChange={e => setForm(f => ({ ...f, memory_model: e.target.value }))}
+                        >
+                          {models.map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="input-base w-full text-sm disabled:opacity-60"
+                          disabled={form.use_default_model_for_memory !== false}
+                          value={memoryModelValue}
+                          onChange={e => setForm(f => ({ ...f, memory_model: e.target.value }))}
+                          placeholder="先获取模型列表，或手动输入记忆存储摘要模型"
                         />
                       )}
                     </div>

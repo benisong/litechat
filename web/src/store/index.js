@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS = {
   default_model: 'gpt-4o-mini',
   use_default_model_for_character_card: true,
   character_card_model: '',
+  use_default_model_for_memory: true,
+  memory_model: '',
   memory_prompt_suffix: '',
   theme: 'dark',
   service_mode: 'self',

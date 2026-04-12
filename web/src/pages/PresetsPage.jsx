@@ -413,6 +413,9 @@ export default function PresetsPage() {
                 这套提示词只在 <code>service</code> 模式下生效，用于后台异步生成小摘要和大摘要。
                 输出协议、标签结构和安全约束由系统固定，这里只开放补充提示词给管理员微调。
               </p>
+              <p className="text-xs text-primary-300">
+                摘要模型请在“设置 / API 配置”中单独选择；默认会跟随当前聊天模型。
+              </p>
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
                 不要要求模型改动标签结构、输出 Markdown、增加额外字段，或把隐藏思考内容写进摘要。
               </div>

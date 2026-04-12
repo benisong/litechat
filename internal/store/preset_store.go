@@ -388,6 +388,7 @@ func (s *ConfigStore) Set(key, value string) error {
 func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 	settings := &model.AppSettings{
 		UseDefaultModelForCharacterCard: true,
+		UseDefaultModelForMemory:        true,
 		ServiceMode:                     "self",
 	}
 	rows, err := s.db.Query(`SELECT key, value FROM configs`)
@@ -415,6 +416,13 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			}
 		case "character_card_model":
 			settings.CharacterCardModel = v
+		case "use_default_model_for_memory":
+			parsed, err := strconv.ParseBool(v)
+			if err == nil {
+				settings.UseDefaultModelForMemory = parsed
+			}
+		case "memory_model":
+			settings.MemoryModel = v
 		case "memory_prompt_suffix":
 			settings.MemoryPromptSuffix = v
 		case "theme":

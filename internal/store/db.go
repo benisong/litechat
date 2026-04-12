@@ -211,6 +211,8 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('api_endpoint', 'https://api.openai.com/v1');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('api_key', '');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('use_default_model_for_memory', 'true');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_model', '');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_prompt_suffix', '');

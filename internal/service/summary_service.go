@@ -519,6 +519,11 @@ func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
 
 func (s *SummaryService) callSummaryCompletion(settings *model.AppSettings, prompt string, maxTokens int) (string, error) {
 	modelName := strings.TrimSpace(settings.DefaultModel)
+	if !settings.UseDefaultModelForMemory {
+		if customModel := strings.TrimSpace(settings.MemoryModel); customModel != "" {
+			modelName = customModel
+		}
+	}
 	if modelName == "" {
 		return "", fmt.Errorf("未配置可用模型")
 	}
