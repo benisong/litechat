@@ -9,6 +9,8 @@ type User struct {
 	PasswordHash string    `json:"-" db:"password_hash"`
 	Role         string    `json:"role" db:"role"`       // admin / user
 	Mode         string    `json:"mode" db:"mode"`       // self / service（用户所属模式）
+	UserName     string    `json:"user_name" db:"user_name"`
+	UserDetail   string    `json:"user_detail" db:"user_detail"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 }
@@ -36,4 +38,10 @@ type CreateUserRequest struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required"`
+}
+
+// UpdateUserProfileRequest 更新当前用户资料请求
+type UpdateUserProfileRequest struct {
+	UserName   string `json:"user_name" binding:"required"`
+	UserDetail string `json:"user_detail"`
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Save, Upload } from 'lucide-react'
-import { useCharacterStore, useSettingsStore, useUIStore } from '../store'
+import { useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 
 const FIELD_LABELS = {
@@ -182,31 +182,18 @@ export default function CharacterEditPage() {
           </div>
 
           {!form.use_custom_user ? (
-            <p className="text-xs text-gray-500">使用全局默认用户信息</p>
+            <p className="text-xs text-gray-500">未启用自定义用户信息时，将使用当前账户的用户资料。</p>
           ) : (
             <div className="space-y-3 mt-2">
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户名称</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={form.user_name || ''}
-                    onChange={e => setForm(f => ({ ...f, user_name: e.target.value }))}
-                    placeholder="输入用户名称"
-                    className="flex-1 input-base"
-                  />
-                  <button
-                    onClick={() => {
-                      const settings = useSettingsStore.getState().settings
-                      if (settings.default_user_name) {
-                        setForm(f => ({ ...f, user_name: settings.default_user_name }))
-                      }
-                    }}
-                    className="btn-ghost px-3 py-2 text-xs text-gray-400 hover:text-primary-300 border border-surface-border rounded-xl"
-                  >
-                    默认
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  value={form.user_name || ''}
+                  onChange={e => setForm(f => ({ ...f, user_name: e.target.value }))}
+                  placeholder="输入用户名称"
+                  className="w-full input-base"
+                />
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户详情</label>

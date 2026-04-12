@@ -136,8 +136,6 @@ type AppSettings struct {
 	CharacterCardModel              string `json:"character_card_model"`
 	Theme                           string `json:"theme"`
 	ServiceMode                     string `json:"service_mode"`
-	DefaultUserName                 string `json:"default_user_name"`
-	DefaultUserDetail               string `json:"default_user_detail"`
 }
 
 // SendMessageRequest 发送消息请求

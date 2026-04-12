@@ -46,6 +46,8 @@ func (db *DB) InitSchema() error {
 		password_hash TEXT NOT NULL,
 		role          TEXT NOT NULL DEFAULT 'user',
 		mode          TEXT NOT NULL DEFAULT 'self',
+		user_name     TEXT DEFAULT '',
+		user_detail   TEXT DEFAULT '',
 		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(username, mode)
@@ -169,8 +171,6 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
-	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_user_name', '');
-	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_user_detail', '');
 	`
 
 	_, err := db.Exec(schema)
@@ -190,6 +190,8 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
+	db.Exec(`ALTER TABLE users ADD COLUMN user_name TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE users ADD COLUMN user_detail TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN use_custom_user INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
@@ -200,6 +202,8 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE presets ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`UPDATE users SET user_name = 'user' WHERE role = 'user' AND (user_name = '' OR user_name IS NULL)`)
+	db.Exec(`DELETE FROM configs WHERE key IN ('default_user_name', 'default_user_detail')`)
 
 	log.Println("数据库结构初始化完成")
 	return nil

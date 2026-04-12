@@ -121,7 +121,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		firstMsg := &model.Message{
 			ChatID:  chatID,
 			Role:    "assistant",
-			Content: s.replaceVars(character.FirstMsg, character),
+			Content: s.replaceVars(character.FirstMsg, character, userID),
 		}
 		if err := s.messageStore.Create(firstMsg); err != nil {
 			log.Printf("[开场白] 保存失败: %v", err)
@@ -377,50 +377,71 @@ func (s *ChatService) loadPreset(chatPresetID, requestPresetID, userID string) *
 }
 
 // replaceVars 替换提示词中的模板变量和 SillyTavern 宏
-// getUserName 获取用户名称（角色卡自定义 > 全局设置 > "User"）
-func (s *ChatService) getUserName(char *model.Character) string {
+func (s *ChatService) getDefaultUserProfile(userID string) (string, string, bool) {
+	user, err := s.userStore.GetByID(userID)
+	if err != nil {
+		return "user", "", false
+	}
+
+	userName := strings.TrimSpace(user.UserName)
+	userDetail := strings.TrimSpace(user.UserDetail)
+	if userName == "" {
+		userName = "user"
+	}
+
+	isCustom := !strings.EqualFold(userName, "user") || userDetail != ""
+	return userName, userDetail, isCustom
+}
+
+// getUserName 获取用户名称（角色卡自定义 > 当前用户资料 > "user"）
+func (s *ChatService) getUserName(char *model.Character, userID string) string {
 	if char.UseCustomUser && char.UserName != "" {
 		return char.UserName
 	}
-	settings, err := s.configStore.GetSettings()
-	if err == nil && settings.DefaultUserName != "" {
-		return settings.DefaultUserName
-	}
-	return "User"
+	userName, _, _ := s.getDefaultUserProfile(userID)
+	return userName
 }
 
-// getUserDetail 获取用户详情（角色卡自定义 > 全局设置）
-func (s *ChatService) getUserDetail(char *model.Character) string {
+// getUserDetail 获取用户详情（角色卡自定义 > 当前用户资料）
+func (s *ChatService) getUserDetail(char *model.Character, userID string) string {
 	if char.UseCustomUser {
 		return char.UserDetail
 	}
-	settings, err := s.configStore.GetSettings()
-	if err == nil {
-		return settings.DefaultUserDetail
-	}
-	return ""
+	_, userDetail, _ := s.getDefaultUserProfile(userID)
+	return userDetail
 }
 
-func (s *ChatService) replaceVars(template string, char *model.Character) string {
+func (s *ChatService) replaceVars(template string, char *model.Character, userID string) string {
 	result := template
 
 	// 用户变量
-	userName := s.getUserName(char)
+	defaultUserName, defaultUserDetail, hasCustomProfile := s.getDefaultUserProfile(userID)
+	userName := defaultUserName
+	if char.UseCustomUser && char.UserName != "" {
+		userName = char.UserName
+	}
 	result = strings.ReplaceAll(result, "{{user}}", userName)
 	result = strings.ReplaceAll(result, "{{User}}", userName)
 
 	// 角色变量
 	result = strings.ReplaceAll(result, "{{char}}", char.Name)
 
-	// {{description}} 前面拼接用户信息（仅在用户实际配置了信息时）
-	userDetail := s.getUserDetail(char)
+	// {{description}} 前面拼接用户信息（仅角色卡开启自定义用户信息时）
+	userDetail := defaultUserDetail
+	if char.UseCustomUser {
+		userDetail = char.UserDetail
+	}
 	descWithUserInfo := char.Description
-	// 只有当用户主动设置了名称（非默认 "User"）或有详情时才拼接
-	hasCustomName := (char.UseCustomUser && char.UserName != "") || func() bool {
-		settings, err := s.configStore.GetSettings()
-		return err == nil && settings.DefaultUserName != ""
-	}()
-	if hasCustomName || userDetail != "" {
+	if char.UseCustomUser && (char.UserName != "" || userDetail != "") {
+		var userInfoBlock strings.Builder
+		userInfoBlock.WriteString("[用户信息]\n")
+		userInfoBlock.WriteString("用户名: " + userName + "\n")
+		if userDetail != "" {
+			userInfoBlock.WriteString("用户详情: " + userDetail + "\n")
+		}
+		userInfoBlock.WriteString("\n")
+		descWithUserInfo = userInfoBlock.String() + char.Description
+	} else if hasCustomProfile {
 		var userInfoBlock strings.Builder
 		userInfoBlock.WriteString("[用户信息]\n")
 		userInfoBlock.WriteString("用户名: " + userName + "\n")
@@ -565,7 +586,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	var chatHistory []model.ChatCompletionMessage
 	if char.FirstMsg != "" && len(history) == 0 {
 		chatHistory = append(chatHistory, model.ChatCompletionMessage{
-			Role: "assistant", Content: s.replaceVars(char.FirstMsg, char),
+			Role: "assistant", Content: s.replaceVars(char.FirstMsg, char, userID),
 		})
 	} else {
 		for _, msg := range history {
@@ -613,7 +634,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 		if !e.Enabled {
 			continue
 		}
-		e.Content = s.replaceVars(e.Content, char)
+		e.Content = s.replaceVars(e.Content, char, userID)
 		if e.Role == "" {
 			e.Role = "system"
 		}
@@ -638,7 +659,7 @@ func (s *ChatService) buildMessages(preset *model.Preset, char *model.Character,
 	var result []model.ChatCompletionMessage
 	if systemContent.Len() > 0 {
 		// 追加格式说明 + [开始新对话] 分隔符
-		systemContent.WriteString(s.replaceVars(inputFormatHint, char))
+		systemContent.WriteString(s.replaceVars(inputFormatHint, char, userID))
 		systemContent.WriteString("\n\n[开始新对话]")
 		result = append(result, model.ChatCompletionMessage{
 			Role: "system", Content: systemContent.String(),
@@ -753,7 +774,7 @@ func (s *ChatService) injectWorldBookEntries(messages []model.ChatCompletionMess
 	var injections []wbInject
 
 	for _, entry := range matched {
-		content := s.replaceVars(entry.Content, char)
+		content := s.replaceVars(entry.Content, char, userID)
 		role := entry.Role
 		if role == "" {
 			role = "system"

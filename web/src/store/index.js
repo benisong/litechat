@@ -74,6 +74,21 @@ export const useAuthStore = create(
         return data
       },
 
+      fetchMe: async () => {
+        const data = await apiFetch('/auth/me')
+        set({ user: data })
+        return data
+      },
+
+      updateProfile: async (user_name, user_detail) => {
+        const data = await apiFetch('/auth/me/profile', {
+          method: 'PUT',
+          body: { user_name, user_detail },
+        })
+        set(s => ({ user: { ...s.user, ...data } }))
+        return data
+      },
+
       logout: () => {
         set({ user: null, token: null })
       },

@@ -96,6 +96,40 @@ func (h *Handlers) GetCurrentUser(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
+// UpdateCurrentUserProfile PUT /api/auth/me/profile 更新当前用户资料
+func (h *Handlers) UpdateCurrentUserProfile(c *gin.Context) {
+	userID := GetUserID(c)
+	role, _ := c.Get("role")
+	if role == "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "管理员不需要用户信息"})
+		return
+	}
+
+	var req model.UpdateUserProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	req.UserName = strings.TrimSpace(req.UserName)
+	if req.UserName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "用户名称不能为空"})
+		return
+	}
+
+	if err := h.userStore.UpdateProfile(userID, req.UserName, req.UserDetail); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userStore.GetByID(userID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "用户信息已保存"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
 // CreateUser POST /api/auth/users 创建用户（管理员）
 func (h *Handlers) CreateUser(c *gin.Context) {
 	var req model.CreateUserRequest
@@ -581,21 +615,6 @@ func (h *Handlers) RegenerateMessage(c *gin.Context) {
 	flusher.Flush()
 }
 
-// UpdateUserInfo PUT /api/settings/user-info 保存用户信息（所有用户可用）
-func (h *Handlers) UpdateUserInfo(c *gin.Context) {
-	var req struct {
-		DefaultUserName   string `json:"default_user_name"`
-		DefaultUserDetail string `json:"default_user_detail"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	h.configStore.Set("default_user_name", req.DefaultUserName)
-	h.configStore.Set("default_user_detail", req.DefaultUserDetail)
-	c.JSON(http.StatusOK, gin.H{"message": "用户信息已保存"})
-}
-
 // ========== 预设 API ==========
 
 // ListPresets GET /api/presets
@@ -819,9 +838,6 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	if settings.ServiceMode != "" {
 		h.configStore.Set("service_mode", settings.ServiceMode)
 	}
-	// 用户信息字段始终保存（允许清空）
-	h.configStore.Set("default_user_name", settings.DefaultUserName)
-	h.configStore.Set("default_user_detail", settings.DefaultUserDetail)
 
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})
 }

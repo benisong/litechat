@@ -16,13 +16,17 @@ import Toast from './components/ui/Toast'
 
 export default function App() {
   const { settings, fetchSettings } = useSettingsStore()
-  const { token, user } = useAuthStore()
+  const { token, user, fetchMe } = useAuthStore()
   const isLoggedIn = !!token
   const isAdmin = user?.role === 'admin'
   const isServiceMode = settings.service_mode === 'service'
 
   useEffect(() => {
     if (isLoggedIn) fetchSettings().catch(() => {})
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (isLoggedIn) fetchMe().catch(() => {})
   }, [isLoggedIn])
 
   useEffect(() => {

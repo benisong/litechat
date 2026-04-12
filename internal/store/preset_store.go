@@ -418,10 +418,6 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			settings.Theme = v
 		case "service_mode":
 			settings.ServiceMode = v
-		case "default_user_name":
-			settings.DefaultUserName = v
-		case "default_user_detail":
-			settings.DefaultUserDetail = v
 		}
 	}
 	return settings, nil

@@ -27,6 +27,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 	{
 		// 当前用户信息
 		api.GET("/auth/me", h.GetCurrentUser)
+		api.PUT("/auth/me/profile", h.UpdateCurrentUserProfile)
 		api.PUT("/auth/password", h.ChangePassword)
 
 		// 用户管理（仅管理员）
@@ -76,7 +77,6 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		// 设置（仅管理员）
 		api.GET("/settings", h.GetSettings)
 		api.PUT("/settings", AdminOnly(), h.UpdateSettings)
-		api.PUT("/settings/user-info", h.UpdateUserInfo) // 所有用户可保存用户信息
 
 		// 模型列表（仅管理员）
 		api.GET("/models", AdminOnly(), h.FetchModels)
