@@ -43,19 +43,23 @@ func main() {
 	worldBookStore := store.NewWorldBookStore(db)
 	configStore := store.NewConfigStore(db)
 	userStore := store.NewUserStore(db)
+	summaryStore := store.NewSummaryStore(db)
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {
 		log.Fatalf("创建初始用户失败: %v", err)
 	}
 
-	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore)
+	summaryService := service.NewSummaryService(messageStore, summaryStore, configStore, userStore)
+	summaryService.Start()
+	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore, summaryService)
 
 	handlers := api.NewHandlers(
 		characterStore, chatStore, messageStore,
 		presetStore, worldBookStore, configStore,
 		userStore,
 		chatService,
+		summaryService,
 	)
 
 	r := api.SetupRouter(handlers)

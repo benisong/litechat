@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"litechat/internal/model"
 	"time"
 
@@ -149,20 +150,33 @@ func (s *MessageStore) Create(msg *model.Message) error {
 	msg.ID = uuid.New().String()
 	msg.CreatedAt = time.Now()
 
-	_, err := s.db.Exec(`
-		INSERT INTO messages (id, chat_id, role, content, tokens, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ChatID, msg.Role, msg.Content, msg.Tokens, msg.CreatedAt,
-	)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE chat_id = ?`, msg.ChatID).Scan(&msg.Seq); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ChatID, msg.Seq, msg.Role, msg.Content, msg.Tokens, msg.CreatedAt,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // ListByChatID 查询对话的所有消息
 func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, role, content, tokens, created_at
+		SELECT id, chat_id, seq, role, content, tokens, created_at
 		FROM messages WHERE chat_id = ?
-		ORDER BY created_at ASC`, chatID)
+		ORDER BY seq ASC, created_at ASC`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +185,60 @@ func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 	var list []*model.Message
 	for rows.Next() {
 		msg := &model.Message{}
-		if err := rows.Scan(&msg.ID, &msg.ChatID, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, msg)
 	}
 	return list, nil
+}
+
+// ListByChatIDRange 查询对话中指定范围的消息
+func (s *MessageStore) ListByChatIDRange(chatID string, fromSeq, toSeq int) ([]*model.Message, error) {
+	rows, err := s.db.Query(`
+		SELECT id, chat_id, seq, role, content, tokens, created_at
+		FROM messages
+		WHERE chat_id = ? AND seq >= ? AND seq <= ?
+		ORDER BY seq ASC, created_at ASC`, chatID, fromSeq, toSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*model.Message
+	for rows.Next() {
+		msg := &model.Message{}
+		if err := rows.Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, msg)
+	}
+	return list, nil
+}
+
+// GetByID 查询单条消息
+func (s *MessageStore) GetByID(id string) (*model.Message, error) {
+	msg := &model.Message{}
+	err := s.db.QueryRow(`
+		SELECT id, chat_id, seq, role, content, tokens, created_at
+		FROM messages WHERE id = ?`, id,
+	).Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+// LatestSeq 获取当前对话的最新消息序号
+func (s *MessageStore) LatestSeq(chatID string) (int, error) {
+	var seq sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MAX(seq) FROM messages WHERE chat_id = ?`, chatID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	if !seq.Valid {
+		return 0, nil
+	}
+	return int(seq.Int64), nil
 }
 
 // DeleteByID 删除单条消息
@@ -187,10 +249,9 @@ func (s *MessageStore) DeleteByID(id string) error {
 
 // DeleteFromID 删除指定消息及其之后的所有消息（级联删除）
 func (s *MessageStore) DeleteFromID(id string, chatID string) (int64, error) {
-	// 用 rowid 找到该消息的位置，删除它及之后的所有消息
 	result, err := s.db.Exec(`
-		DELETE FROM messages WHERE chat_id = ? AND rowid >= (
-			SELECT rowid FROM messages WHERE id = ? AND chat_id = ?
+		DELETE FROM messages WHERE chat_id = ? AND seq >= (
+			SELECT seq FROM messages WHERE id = ? AND chat_id = ?
 		)`, chatID, id, chatID)
 	if err != nil {
 		return 0, err

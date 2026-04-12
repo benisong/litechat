@@ -133,11 +133,54 @@ func (db *DB) InitSchema() error {
 	CREATE TABLE IF NOT EXISTS messages (
 		id         TEXT PRIMARY KEY,
 		chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		seq        INTEGER DEFAULT 0,
 		role       TEXT NOT NULL,
 		content    TEXT NOT NULL,
 		tokens     INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq);
+
+	CREATE TABLE IF NOT EXISTS chat_summary_state (
+		chat_id                 TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+		applied_cutoff_seq      INTEGER DEFAULT 0,
+		current_big_summary_id  TEXT DEFAULT '',
+		dirty_from_seq          INTEGER DEFAULT 0,
+		updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS chat_summary_chunks (
+		id             TEXT PRIMARY KEY,
+		chat_id        TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		level          TEXT NOT NULL,
+		from_seq       INTEGER NOT NULL,
+		to_seq         INTEGER NOT NULL,
+		content        TEXT NOT NULL,
+		status         TEXT NOT NULL DEFAULT 'active',
+		merged_into_id TEXT DEFAULT '',
+		created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_summary_chunks_chat_status ON chat_summary_chunks(chat_id, status, level, from_seq);
+
+	CREATE TABLE IF NOT EXISTS chat_summary_jobs (
+		id               TEXT PRIMARY KEY,
+		chat_id          TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		job_type         TEXT NOT NULL,
+		from_seq         INTEGER NOT NULL,
+		to_seq           INTEGER NOT NULL,
+		base_cutoff_seq  INTEGER DEFAULT 0,
+		status           TEXT NOT NULL DEFAULT 'pending',
+		attempt_count    INTEGER DEFAULT 0,
+		next_run_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_error       TEXT DEFAULT '',
+		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_summary_jobs_status_runat ON chat_summary_jobs(status, next_run_at, created_at);
 
 	-- 配置表
 	CREATE TABLE IF NOT EXISTS configs (
@@ -171,6 +214,7 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_prompt_suffix', '');
 	`
 
 	_, err := db.Exec(schema)
@@ -195,6 +239,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE characters ADD COLUMN use_custom_user INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE messages ADD COLUMN seq INTEGER DEFAULT 0`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
@@ -204,6 +249,18 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`UPDATE users SET user_name = 'user' WHERE role = 'user' AND (user_name = '' OR user_name IS NULL)`)
 	db.Exec(`DELETE FROM configs WHERE key IN ('default_user_name', 'default_user_detail')`)
+	db.Exec(`
+		WITH ranked AS (
+			SELECT rowid AS rid,
+			       ROW_NUMBER() OVER (PARTITION BY chat_id ORDER BY created_at ASC, rowid ASC) AS seq
+			FROM messages
+		)
+		UPDATE messages
+		SET seq = (
+			SELECT ranked.seq FROM ranked WHERE ranked.rid = messages.rowid
+		)
+		WHERE COALESCE(seq, 0) = 0
+	`)
 
 	log.Println("数据库结构初始化完成")
 	return nil

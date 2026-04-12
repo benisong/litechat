@@ -10,7 +10,9 @@ const DEFAULT_SETTINGS = {
   default_model: 'gpt-4o-mini',
   use_default_model_for_character_card: true,
   character_card_model: '',
+  memory_prompt_suffix: '',
   theme: 'dark',
+  service_mode: 'self',
 }
 
 // 从 zustand persist 读取 token

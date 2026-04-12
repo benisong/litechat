@@ -388,6 +388,7 @@ func (s *ConfigStore) Set(key, value string) error {
 func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 	settings := &model.AppSettings{
 		UseDefaultModelForCharacterCard: true,
+		ServiceMode:                     "self",
 	}
 	rows, err := s.db.Query(`SELECT key, value FROM configs`)
 	if err != nil {
@@ -414,6 +415,8 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			}
 		case "character_card_model":
 			settings.CharacterCardModel = v
+		case "memory_prompt_suffix":
+			settings.MemoryPromptSuffix = v
 		case "theme":
 			settings.Theme = v
 		case "service_mode":

@@ -52,6 +52,7 @@ type Chat struct {
 type Message struct {
 	ID        string    `json:"id" db:"id"`
 	ChatID    string    `json:"chat_id" db:"chat_id"`
+	Seq       int       `json:"seq" db:"seq"`
 	Role      string    `json:"role" db:"role"`
 	Content   string    `json:"content" db:"content"`
 	Tokens    int       `json:"tokens" db:"tokens"`
@@ -134,8 +135,48 @@ type AppSettings struct {
 	DefaultModel                    string `json:"default_model"`
 	UseDefaultModelForCharacterCard bool   `json:"use_default_model_for_character_card"`
 	CharacterCardModel              string `json:"character_card_model"`
+	MemoryPromptSuffix              string `json:"memory_prompt_suffix"`
 	Theme                           string `json:"theme"`
 	ServiceMode                     string `json:"service_mode"`
+}
+
+// ChatSummaryState 会话摘要状态
+type ChatSummaryState struct {
+	ChatID            string    `json:"chat_id" db:"chat_id"`
+	AppliedCutoffSeq  int       `json:"applied_cutoff_seq" db:"applied_cutoff_seq"`
+	CurrentBigSummary string    `json:"current_big_summary_id" db:"current_big_summary_id"`
+	DirtyFromSeq      int       `json:"dirty_from_seq" db:"dirty_from_seq"`
+	UpdatedAt         time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// ChatSummaryChunk 摘要分片（小摘要 / 大摘要）
+type ChatSummaryChunk struct {
+	ID           string    `json:"id" db:"id"`
+	ChatID        string    `json:"chat_id" db:"chat_id"`
+	Level         string    `json:"level" db:"level"`
+	FromSeq       int       `json:"from_seq" db:"from_seq"`
+	ToSeq         int       `json:"to_seq" db:"to_seq"`
+	Content       string    `json:"content" db:"content"`
+	Status        string    `json:"status" db:"status"`
+	MergedIntoID  string    `json:"merged_into_id" db:"merged_into_id"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// ChatSummaryJob 摘要后台任务
+type ChatSummaryJob struct {
+	ID            string    `json:"id" db:"id"`
+	ChatID         string    `json:"chat_id" db:"chat_id"`
+	JobType        string    `json:"job_type" db:"job_type"`
+	FromSeq        int       `json:"from_seq" db:"from_seq"`
+	ToSeq          int       `json:"to_seq" db:"to_seq"`
+	BaseCutoffSeq  int       `json:"base_cutoff_seq" db:"base_cutoff_seq"`
+	Status         string    `json:"status" db:"status"`
+	AttemptCount   int       `json:"attempt_count" db:"attempt_count"`
+	NextRunAt      time.Time `json:"next_run_at" db:"next_run_at"`
+	LastError      string    `json:"last_error" db:"last_error"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // SendMessageRequest 发送消息请求

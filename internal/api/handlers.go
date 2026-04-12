@@ -24,6 +24,7 @@ type Handlers struct {
 	configStore    *store.ConfigStore
 	userStore      *store.UserStore
 	chatService    *service.ChatService
+	summaryService *service.SummaryService
 }
 
 func NewHandlers(
@@ -35,6 +36,7 @@ func NewHandlers(
 	configStore *store.ConfigStore,
 	userStore *store.UserStore,
 	chatService *service.ChatService,
+	summaryService *service.SummaryService,
 ) *Handlers {
 	return &Handlers{
 		characterStore: characterStore,
@@ -45,6 +47,7 @@ func NewHandlers(
 		configStore:    configStore,
 		userStore:      userStore,
 		chatService:    chatService,
+		summaryService: summaryService,
 	}
 }
 
@@ -549,9 +552,23 @@ func (h *Handlers) SendMessage(c *gin.Context) {
 
 // DeleteMessage DELETE /api/messages/:id
 func (h *Handlers) DeleteMessage(c *gin.Context) {
-	if err := h.messageStore.DeleteByID(c.Param("id")); err != nil {
+	userID := GetUserID(c)
+	msg, err := h.messageStore.GetByID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
+	if _, err := h.chatStore.GetByID(msg.ChatID, userID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+
+	if err := h.messageStore.DeleteByID(msg.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if h.summaryService != nil {
+		h.summaryService.InvalidateFromSeq(msg.ChatID, msg.Seq)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
@@ -568,10 +585,19 @@ func (h *Handlers) DeleteMessageCascade(c *gin.Context) {
 		return
 	}
 
+	msg, err := h.messageStore.GetByID(msgID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
+
 	count, err := h.messageStore.DeleteFromID(msgID, chatID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if h.summaryService != nil {
+		h.summaryService.InvalidateFromSeq(chatID, msg.Seq)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("已删除 %d 条消息", count), "deleted": count})
 }
@@ -832,6 +858,7 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	}
 	h.configStore.Set("use_default_model_for_character_card", fmt.Sprintf("%t", settings.UseDefaultModelForCharacterCard))
 	h.configStore.Set("character_card_model", settings.CharacterCardModel)
+	h.configStore.Set("memory_prompt_suffix", settings.MemoryPromptSuffix)
 	if settings.Theme != "" {
 		h.configStore.Set("theme", settings.Theme)
 	}
