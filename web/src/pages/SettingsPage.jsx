@@ -14,7 +14,7 @@ import {
   Monitor,
   Server,
 } from 'lucide-react'
-import { useSettingsStore, useUIStore, useAuthStore } from '../store'
+import { useSettingsStore, useUIStore, useAuthStore, getToken } from '../store'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 
@@ -89,7 +89,7 @@ export default function SettingsPage() {
       if (!String(form.api_key || '').startsWith('***')) {
         params.set('key', form.api_key)
       }
-      const token = JSON.parse(localStorage.getItem('litechat-auth') || '{}')?.state?.token
+      const token = getToken()
       const res = await fetch(`/api/models?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       })

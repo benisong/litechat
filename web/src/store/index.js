@@ -1,8 +1,10 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 // ===== API 工具函数 =====
 const BASE = '/api'
+const AUTH_STORAGE_KEY = 'litechat-auth'
+const authStorage = createJSONStorage(() => sessionStorage)
 
 const DEFAULT_SETTINGS = {
   api_endpoint: 'https://api.openai.com/v1',
@@ -16,9 +18,22 @@ const DEFAULT_SETTINGS = {
 }
 
 // 从 zustand persist 读取 token
-function getToken() {
+function clearAuthPersistence() {
   try {
-    const stored = localStorage.getItem('litechat-auth')
+    sessionStorage.removeItem(AUTH_STORAGE_KEY)
+  } catch {}
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+  } catch {}
+}
+
+try {
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+} catch {}
+
+export function getToken() {
+  try {
+    const stored = sessionStorage.getItem(AUTH_STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
       return parsed?.state?.token || null
@@ -43,7 +58,10 @@ async function apiFetch(path, options = {}) {
   // 401 未认证 → 静默抛出错误，由调用方处理
   // 不做硬刷新，避免无限循环；路由守卫会在 token 清除后自动跳转登录页
   if (res.status === 401) {
-    localStorage.removeItem('litechat-auth')
+    clearAuthPersistence()
+    try {
+      useAuthStore.setState({ user: null, token: null })
+    } catch {}
     throw new Error('未授权，请重新登录')
   }
 
@@ -92,6 +110,7 @@ export const useAuthStore = create(
       },
 
       logout: () => {
+        clearAuthPersistence()
         set({ user: null, token: null })
       },
 
@@ -99,7 +118,8 @@ export const useAuthStore = create(
       isAdmin: () => get().user?.role === 'admin',
     }),
     {
-      name: 'litechat-auth',
+      name: AUTH_STORAGE_KEY,
+      storage: authStorage,
       partialize: (state) => ({ user: state.user, token: state.token }),
     }
   )

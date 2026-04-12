@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, RefreshCw, Trash2 } from 'lucide-react'
-import { useChatStore, useCharacterStore, useUIStore } from '../store'
+import { useChatStore, useCharacterStore, useUIStore, getToken } from '../store'
 import MessageBubble from '../components/chat/MessageBubble'
 import ChatInput from '../components/chat/ChatInput'
 import Avatar from '../components/ui/Avatar'
@@ -9,8 +9,7 @@ import Modal from '../components/ui/Modal'
 
 function getAuthHeaders() {
   try {
-    const stored = localStorage.getItem('litechat-auth')
-    const token = stored ? JSON.parse(stored)?.state?.token : null
+    const token = getToken()
     return token ? { Authorization: `Bearer ${token}` } : {}
   } catch {
     return {}

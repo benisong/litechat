@@ -6,8 +6,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      injectRegister: null,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+      },
       manifest: {
         name: 'LiteChat',
         short_name: 'LiteChat',
