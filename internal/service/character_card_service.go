@@ -18,64 +18,64 @@ type templateChoiceOption struct {
 }
 
 var characterGenderOptions = map[string]templateChoiceOption{
-	"female": {Label: "女性", Hint: "生成女性角色，气质和关系设计要自然可信，避免空泛模板化。"},
-	"male":   {Label: "男性", Hint: "生成男性角色，互动风格要鲜明、稳定，并有明确的人物吸引力。"},
+	"female": {Label: "女性", Hint: "生成女性角色，气质、关系推进和情绪表达要自然可信，避免空泛模板化。"},
+	"male":   {Label: "男性", Hint: "生成男性角色，魅力点、说话方式和互动节奏要鲜明稳定，不要写成空壳设定。"},
 }
 
 var characterSettingOptions = map[string]templateChoiceOption{
-	"city":          {Label: "现代都市", Hint: "故事舞台是现实都市，细节贴近日常生活、现实社交和成年人关系推进。"},
-	"school":        {Label: "校园青春", Hint: "故事舞台是校园，保留青春感、日常感和带点青涩的情绪流动。"},
-	"office":        {Label: "职场办公室", Hint: "故事围绕工作关系展开，要有边界感、张力和克制感。"},
-	"entertainment": {Label: "娱乐圈", Hint: "故事围绕名利场、曝光、资源和镜头外的真实情绪展开。"},
-	"fantasy":       {Label: "西幻异世界", Hint: "世界观可带有魔法、骑士、学院、王城等元素，但仍要服务人物关系。"},
-	"wuxia":         {Label: "仙侠江湖", Hint: "世界观可带宗门、江湖、师门、历练、宿命感，语言有适度古风气息。"},
-	"apocalypse":    {Label: "末日废土", Hint: "环境危险、资源稀缺，关系推进要带生存压力和强绑定感。"},
+	"city":          {Label: "现代都市", Hint: "世界观要扎根现实都市生活，可带行业圈层、城市气质、阶层差异或地下暗线，不要只是普通日常背景板。"},
+	"school":        {Label: "校园青春", Hint: "世界观要体现校园生态、社团、成绩竞争、人际流言、成长压力与青春情绪，而不是只有教室和放学。"},
+	"office":        {Label: "职场办公室", Hint: "世界观要体现行业规则、权力结构、利益关系和职场边界，让人物背景与职业环境真正互相咬合。"},
+	"entertainment": {Label: "娱乐圈", Hint: "世界观要包含曝光、资本、经纪体系、资源争夺与公众形象管理，让人物处境和情绪来源有行业支撑。"},
+	"fantasy":       {Label: "西幻异世界", Hint: "世界观要有独立的权力体系、地理风貌、超凡规则或种族秩序，人物身份必须与这些设定强绑定。"},
+	"wuxia":         {Label: "仙侠江湖", Hint: "世界观要有门派、修行体系、因果恩怨、地位秩序与江湖规矩，人物来历与立场要从世界中长出来。"},
+	"apocalypse":    {Label: "末日废土", Hint: "世界观要有生存规则、资源体系、危险来源与据点秩序，人物过去和现在都要被末世塑造。"},
 }
 
 var characterTypeOptions = map[string]templateChoiceOption{
-	"pure":       {Label: "白月光", Hint: "整体氛围偏温柔、心动、慢热和可长期相处的陪伴感。"},
-	"unrequited": {Label: "求而不得", Hint: "整体氛围偏克制、拉扯、若即若离，带明显的情感落差。"},
-	"healing":    {Label: "治愈陪伴", Hint: "整体氛围偏安抚、陪伴、互相接住情绪，适合日常互动。"},
-	"rivalry":    {Label: "欢喜冤家", Hint: "整体氛围偏互怼、较劲、互相拆台又默契十足。"},
-	"forbidden":  {Label: "禁忌拉扯", Hint: "整体氛围偏不能说破、身份受限、越克制越上头。"},
-	"dangerous":  {Label: "危险关系", Hint: "整体氛围偏不安全、试探、压迫感与吸引力并存。"},
+	"pure":       {Label: "白月光", Hint: "整体氛围偏心动、慢热、温柔和克制，关系张力来自靠近时的悸动与舍不得打破平衡。"},
+	"unrequited": {Label: "求而不得", Hint: "整体氛围偏拉扯、克制、暧昧与情感落差，人物必须有无法轻易跨过的现实或心理障碍。"},
+	"healing":    {Label: "治愈陪伴", Hint: "整体氛围偏安抚、互相接住、长期相处和情绪修复，人物需要有能支撑陪伴感的内在温度。"},
+	"rivalry":    {Label: "欢喜冤家", Hint: "整体氛围偏互怼、较劲、针锋相对但默契十足，关系推进要带火花和反差。"},
+	"forbidden":  {Label: "禁忌拉扯", Hint: "整体氛围偏压抑、不可言说、身份受限与越克制越上头，人物和背景都需要天然制造禁忌感。"},
+	"dangerous":  {Label: "危险关系", Hint: "整体氛围偏试探、不安全、诱惑与压迫并存，角色必须具备让人想逃又忍不住靠近的魅力。"},
 }
 
 var characterPersonalityOptions = map[string]templateChoiceOption{
-	"tsundere": {Label: "傲娇", Hint: "嘴硬心软，说话会否认在意，但行动会暴露真实情绪。"},
-	"gentle":   {Label: "温柔", Hint: "说话柔和耐心，擅长照顾人，情绪稳定但不是毫无个性。"},
-	"scheming": {Label: "腹黑", Hint: "表面从容好相处，实则很会拿捏节奏、试探反应、引导关系。"},
-	"airhead":  {Label: "天然呆", Hint: "反应慢半拍，常在无意间说出让人心动或失控的话。"},
-	"aloof":    {Label: "高冷", Hint: "外冷内热，有距离感和筛选感，但偏爱时会明显失衡。"},
-	"dominant": {Label: "强势", Hint: "掌控欲、压迫感和保护欲并存，习惯主导相处节奏。"},
-	"playful":  {Label: "会撩", Hint: "有松弛感和坏心思，擅长用语言和氛围推进暧昧。"},
+	"tsundere": {Label: "傲娇", Hint: "嘴硬心软，表面抗拒、嘴上否认，真实情绪会通过小动作、语气失衡和占有欲泄露。"},
+	"gentle":   {Label: "温柔", Hint: "细腻、稳、会照顾人，但不是没有锋芒；温柔应该建立在明确的人生经历和选择上。"},
+	"scheming": {Label: "腹黑", Hint: "擅长观察、试探、掌控节奏和诱导关系，外在从容，内里清醒，不能只写成单薄坏笑。"},
+	"airhead":  {Label: "天然呆", Hint: "反应慢半拍、带点迟钝和纯粹，但不能空白；要有自己独特的判断逻辑和可爱失衡感。"},
+	"aloof":    {Label: "高冷", Hint: "外冷内热、边界感强、筛选欲明显，但偏爱时会有克制不住的失守和例外。"},
+	"dominant": {Label: "强势", Hint: "掌控欲、压迫感、保护欲与占有欲并存，习惯主导关系节奏，但也要有触发软化的内因。"},
+	"playful":  {Label: "会撩", Hint: "会逗人、会试探、懂得拿捏氛围和距离，语言风格要有张力，不能只是油嘴滑舌。"},
 }
 
 var characterPOVOptions = map[string]templateChoiceOption{
-	"second": {Label: "第二人称", Hint: "开场白和叙事更贴近沉浸式体验，优先使用“你”。"},
-	"third":  {Label: "第三人称", Hint: "叙事更像旁观描写，可自然使用 {{user}} 表示用户名字。"},
+	"second": {Label: "第二人称", Hint: "开场白和叙事更偏沉浸式体验，优先使用“你”，让读者直接在场。"},
+	"third":  {Label: "第三人称", Hint: "叙事更有镜头感和空间感，可自然使用 {{user}} 表示用户名字。"},
 }
 
-const characterCardSystemPrompt = `你是资深中文角色卡作者，擅长撰写适合角色扮演聊天应用的角色卡，风格接近常见角色卡站的高质量卡面文案。
-
-你生成的内容必须具备这些特征：
-1. 人设清晰，关系钩子明确，有能直接开聊的互动张力。
-2. 文案像角色卡字段，而不是小说段落、设定百科或系统说明。
-3. description、personality、scenario、first_msg 都要可直接放进角色卡站的对应栏位。
-4. 语言自然、细节密度高，但不要堆砌辞藻，不要写空泛万能人设。
+const characterCardSystemPrompt = `你是资深中文角色卡作者，擅长写适合角色扮演聊天应用的高质量角色卡。
+你生成的内容必须同时满足以下标准：
+1. 人设鲜明、可长期互动、不是空泛模板。
+2. 性格要详细，有层次、有反差、有习惯、有情绪触发点、有说话风格。
+3. 外貌要详细，能让用户看见这个人，而不是一句“长得很好看”带过。
+4. 人物背景要和身份、性格、关系张力互相支撑，不能漂浮。
+5. 世界观要独立成立，尤其在非现实设定里，要让人物明显属于这个世界；现实设定也要有清晰的社会环境、圈层或规则。
+6. description、personality、scenario、first_msg 都要像角色卡站常见字段，而不是小说段落、百科或系统说明。
 
 严格遵守以下规则：
 1. 你不是在聊天，也不是在扮演角色，你是在生成角色卡。
-2. 不要使用任何预设提示词口吻，不要输出解释、前言、总结、Markdown、代码块。
-3. 所有字段必须非空，且内容具体、可用、适合长期聊天使用。
-4. description 更像角色简介，需要写出身份、外貌气质、背景、与用户的关系切入口。
-5. personality 更像角色卡站常见的人设描述，需要写出性格核心、说话风格、习惯、情绪触发点、偏爱方式或弱点。
-6. scenario 只写“此刻正在发生什么”和“用户为什么会在这里”，不要写成世界观百科。
-7. first_msg 必须像角色卡站常见开场白，直接进入场景，可带动作描写、情绪和对话，生成后就能继续聊天。
-8. 保持字段之间的人物气质一致，不要互相矛盾。
-9. 除 {{user}} 外，不要输出任何占位符或元信息。
-10. tags 输出 4 到 7 个简短中文标签，用逗号分隔。
-11. 不要输出 avatar_url、user_name、user_detail 等未要求字段。
+2. 不要输出解释、前言、总结、Markdown、代码块。
+3. 所有字段必须非空，内容具体、自然、可直接用于角色扮演聊天。
+4. description 必须写出角色身份、样貌细节、气质、成长/经历、当前处境，以及角色与用户关系的切入口。
+5. personality 必须写出核心性格、反差、说话方式、行为习惯、情绪触发点、底线、偏爱方式或弱点，不能只写几个形容词。
+6. scenario 必须写出当前故事背景和正在发生的场景，让人物所处世界立得住，同时能立刻接戏。
+7. first_msg 必须像角色卡站常见开场白，直接进入互动，带一点动作、氛围或台词，不要写字段名，不要解释。
+8. 除 {{user}} 外，不要输出任何占位符或元信息。
+9. tags 输出 4 到 7 个简短中文标签，用逗号分隔。
+10. 不要输出 avatar_url、user_name、user_detail 等未要求字段。
 
 输出格式必须严格如下：
 <character_card>
@@ -134,7 +134,7 @@ func (s *ChatService) GenerateCharacterCardDraft(req model.GenerateCharacterCard
 		{Role: "user", Content: prompt},
 	}
 
-	raw, err := s.callOpenAICompletion(settings, modelName, messages, 1.0, 2200, 0.95)
+	raw, err := s.callOpenAICompletion(settings, modelName, messages, 1.0, 2800, 0.95)
 	if err != nil {
 		return nil, err
 	}
@@ -156,21 +156,26 @@ func buildCharacterCardPrompt(gender, setting, storyType, personality, pov templ
 	builder.WriteString(fmt.Sprintf("- 角色性格：%s。%s\n", personality.Label, personality.Hint))
 	builder.WriteString(fmt.Sprintf("- 叙事视角：%s。%s\n", pov.Label, pov.Hint))
 	if strings.TrimSpace(customPersonality) != "" {
-		builder.WriteString(fmt.Sprintf("- 用户补充的性格要求：%s\n", strings.TrimSpace(customPersonality)))
+		builder.WriteString(fmt.Sprintf("- 用户补充的人设要求：%s\n", strings.TrimSpace(customPersonality)))
 	}
 
 	builder.WriteString(`
 额外要求：
-1. 生成结果要更像角色卡站常见写法：人设鲜明、关系切入口明确、开场白可直接接戏。
-2. name 要自然、顺口、辨识度强，并与世界观匹配；现代场景优先现代姓名，奇幻或古风场景可适度风格化。
-3. description 建议控制在 120 到 220 个中文字符之间，重点写身份、外貌气质、过去经历、和用户的关系起点。
-4. personality 建议控制在 120 到 220 个中文字符之间，写出性格核心、说话方式、习惯、小弱点、情绪触发点和对用户的偏爱方式。
-5. scenario 建议控制在 80 到 160 个中文字符之间，只写当前关系阶段和眼下场景，不要写成长篇背景说明。
-6. first_msg 建议控制在 80 到 220 个中文字符之间，要像角色卡站常见的第一条回复：直接进入互动状态，带一点动作描写、氛围和台词。
-7. second 视角时优先使用“你”；third 视角时可以自然使用 {{user}} 表示用户名字。
-8. 文风要适合角色扮演聊天，不要出现管理员、系统、模型、提示词、安全说明等元信息。
-9. tags 使用简短中文标签，优先覆盖世界观、关系感、角色气质、互动张力。
-10. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段内容本身。`)
+1. 角色必须像一个真实存在、能长期互动的人，而不是单句标签的拼接。
+2. name 要自然、顺口、有辨识度，并与人物出身、世界观和气质匹配。
+3. description 建议写到 180 到 320 个中文字符，至少覆盖：身份、外貌与体态细节、穿着或标志性特征、气质、过去经历、当前处境、和用户之间的关系入口。
+4. personality 建议写到 180 到 320 个中文字符，至少覆盖：核心性格、性格反差、说话方式、行为习惯、情绪触发点、底线、偏爱方式、脆弱面或执念。
+5. 外貌描写必须具体，至少让人能感知脸、眼神、发型、身形、穿着或气味/动作中的几项，不要只写“漂亮”“帅气”“清冷”这种空词。
+6. 人物背景必须解释人物为什么会成为现在这样的人，且背景要和场景、基调、性格互相咬合。
+7. 世界观必须是有独立感的：
+   - 现实题材也要有明确的城市、圈层、行业、家庭或社会规则。
+   - 架空题材要有清晰的权力结构、阵营、超凡规则、地域或生存秩序。
+8. scenario 建议写到 140 到 240 个中文字符，既要交代眼下所处环境，也要让人物背景和世界观自然落地，不能只是“你们相遇了”。
+9. first_msg 建议写到 120 到 260 个中文字符，必须像真正能接着聊下去的开场：要有动作、语气、氛围和角色感，不要像说明书。
+10. second 视角时优先使用“你”；third 视角时可以自然使用 {{user}} 表示用户名字。
+11. 内容要更接近高质量角色卡站常见写法：信息密度高、人物感强、张力明确、世界感成立。
+12. tags 重点覆盖人物气质、关系张力、题材世界观和互动风格。
+13. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段正文。`)
 
 	return builder.String()
 }
