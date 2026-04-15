@@ -10,10 +10,11 @@ import {
   ArrowLeft,
   Loader2,
 } from 'lucide-react'
-import { useCharacterStore, useChatStore, useUIStore } from '../store'
+import { useAuthStore, useCharacterStore, useChatStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
+import { renderRolePlaceholders } from '../utils/placeholderRender'
 
 const STEPS = [
   {
@@ -98,6 +99,7 @@ function getChoiceLabels(choices) {
 
 export default function CharactersPage() {
   const navigate = useNavigate()
+  const user = useAuthStore(state => state.user)
   const { characters, fetchCharacters, deleteCharacter, generateCharacterCard } = useCharacterStore()
   const { createChat } = useChatStore()
   const { showToast } = useUIStore()
@@ -252,7 +254,9 @@ export default function CharactersPage() {
 
                 <div>
                   <h3 className="font-semibold text-sm mb-1 truncate">{char.name}</h3>
-                  <p className="text-xs text-gray-500 line-clamp-2">{char.description || '暂无描述'}</p>
+                  <p className="text-xs text-gray-500 line-clamp-2">
+                    {renderRolePlaceholders(char.description, { character: char, user }) || '暂无描述'}
+                  </p>
                 </div>
 
                 <div className="flex gap-2 mt-auto">
@@ -301,21 +305,36 @@ export default function CharactersPage() {
             {selectedChar.description && (
               <div>
                 <p className="text-xs text-gray-500 mb-1">描述</p>
-                <p className="text-sm text-gray-300">{selectedChar.description}</p>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                  {renderRolePlaceholders(selectedChar.description, { character: selectedChar, user })}
+                </p>
               </div>
             )}
 
             {selectedChar.personality && (
               <div>
                 <p className="text-xs text-gray-500 mb-1">性格</p>
-                <p className="text-sm text-gray-300 whitespace-pre-wrap">{selectedChar.personality}</p>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                  {renderRolePlaceholders(selectedChar.personality, { character: selectedChar, user })}
+                </p>
+              </div>
+            )}
+
+            {selectedChar.scenario && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">场景</p>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap">
+                  {renderRolePlaceholders(selectedChar.scenario, { character: selectedChar, user })}
+                </p>
               </div>
             )}
 
             {selectedChar.first_msg && (
               <div>
                 <p className="text-xs text-gray-500 mb-1">开场白</p>
-                <p className="text-sm text-gray-300 italic whitespace-pre-wrap">“{selectedChar.first_msg}”</p>
+                <p className="text-sm text-gray-300 italic whitespace-pre-wrap">
+                  “{renderRolePlaceholders(selectedChar.first_msg, { character: selectedChar, user })}”
+                </p>
               </div>
             )}
 

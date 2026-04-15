@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, MoreVertical, RefreshCw, Trash2 } from 'lucide-react'
-import { useChatStore, useCharacterStore, useUIStore, getToken } from '../store'
+import { useAuthStore, useChatStore, useCharacterStore, useUIStore, getToken } from '../store'
 import MessageBubble from '../components/chat/MessageBubble'
 import ChatInput from '../components/chat/ChatInput'
 import Avatar from '../components/ui/Avatar'
 import Modal from '../components/ui/Modal'
+import { renderRolePlaceholders } from '../utils/placeholderRender'
 
 function getAuthHeaders() {
   try {
@@ -20,6 +21,7 @@ export default function ChatPage() {
   const { chatId } = useParams()
   const navigate = useNavigate()
   const { showToast } = useUIStore()
+  const user = useAuthStore(state => state.user)
 
   const {
     messages,
@@ -152,8 +154,10 @@ export default function ChatPage() {
 
   // Keep the synthetic opening message visible during the first round-trip.
   const hasPersistedMessages = messages.some(msg => !String(msg.id || '').startsWith('temp-'))
-  const showOpeningScene = !loading && character?.scenario && !hasPersistedMessages
-  const showFirstMsg = !loading && character?.first_msg && !hasPersistedMessages
+  const displayScenario = renderRolePlaceholders(character?.scenario, { character, user })
+  const displayFirstMsg = renderRolePlaceholders(character?.first_msg, { character, user })
+  const showOpeningScene = !loading && displayScenario && !hasPersistedMessages
+  const showFirstMsg = !loading && displayFirstMsg && !hasPersistedMessages
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-dark-400">
@@ -191,7 +195,7 @@ export default function ChatPage() {
                 场景设定
               </p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-300">
-                {character.scenario}
+                {displayScenario}
               </p>
             </div>
           </div>
@@ -203,7 +207,7 @@ export default function ChatPage() {
             <div className="flex flex-col gap-1 max-w-[78%]">
               <span className="text-xs text-gray-500 px-1">{character.name}</span>
               <div className="bubble-ai text-sm leading-relaxed whitespace-pre-wrap">
-                {character.first_msg}
+                {displayFirstMsg}
               </div>
             </div>
           </div>

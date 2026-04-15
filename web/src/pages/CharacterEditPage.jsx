@@ -1,8 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Save, Upload } from 'lucide-react'
-import { useCharacterStore, useUIStore } from '../store'
+import { useAuthStore, useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
+import {
+  renderRolePlaceholders,
+  resolveCharacterDisplayName,
+  resolveUserDisplayName,
+} from '../utils/placeholderRender'
 
 const FIELD_LABELS = {
   name: { label: '角色名称 *', placeholder: '例如：爱丽丝', type: 'input' },
@@ -53,6 +58,7 @@ export default function CharacterEditPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const user = useAuthStore(state => state.user)
   const { createCharacter, updateCharacter, fetchCharacter } = useCharacterStore()
   const { showToast } = useUIStore()
   const isNew = !id
@@ -64,6 +70,12 @@ export default function CharacterEditPage() {
 
   const [form, setForm] = useState(() => sanitizeFormData(draftFromTemplate || EMPTY_FORM))
   const [saving, setSaving] = useState(false)
+  const displayCharacterName = resolveCharacterDisplayName(form)
+  const displayUserName = resolveUserDisplayName(form, user)
+  const renderedDescription = renderRolePlaceholders(form.description, { character: form, user })
+  const renderedPersonality = renderRolePlaceholders(form.personality, { character: form, user })
+  const renderedScenario = renderRolePlaceholders(form.scenario, { character: form, user })
+  const renderedFirstMsg = renderRolePlaceholders(form.first_msg, { character: form, user })
 
   useEffect(() => {
     if (!isNew) {
@@ -205,6 +217,49 @@ export default function CharacterEditPage() {
                   className="w-full input-base resize-none"
                 />
               </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-surface/50 rounded-xl p-4 border border-surface-border space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-gray-500">渲染预览</p>
+              <p className="mt-1 text-xs text-gray-500">
+                这里展示用户看到的最终文本，编辑区仍保留原始占位符模板。
+              </p>
+            </div>
+            <div className="text-right text-[11px] text-gray-500 whitespace-nowrap">
+              <p>{'{{char}}'} = {displayCharacterName}</p>
+              <p>{'{{user}}'} = {displayUserName}</p>
+            </div>
+          </div>
+
+          {renderedDescription && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">描述</p>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap">{renderedDescription}</p>
+            </div>
+          )}
+
+          {renderedPersonality && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">性格</p>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap">{renderedPersonality}</p>
+            </div>
+          )}
+
+          {renderedScenario && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">场景设定</p>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap">{renderedScenario}</p>
+            </div>
+          )}
+
+          {renderedFirstMsg && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">开场白</p>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap">“{renderedFirstMsg}”</p>
             </div>
           )}
         </div>

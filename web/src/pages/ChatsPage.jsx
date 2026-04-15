@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageSquare, Trash2, Plus, Search } from 'lucide-react'
-import { useChatStore, useCharacterStore, useUIStore } from '../store'
+import { useAuthStore, useChatStore, useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
+import { renderRolePlaceholders } from '../utils/placeholderRender'
 
 export default function ChatsPage() {
   const navigate = useNavigate()
+  const user = useAuthStore(state => state.user)
   const { chats, fetchChats, deleteChat } = useChatStore()
   const { characters, fetchCharacters } = useCharacterStore()
   const { showToast } = useUIStore()
@@ -174,7 +176,9 @@ export default function ChatsPage() {
                 <Avatar name={char.name} src={char.avatar_url} size="md" />
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm">{char.name}</p>
-                  <p className="text-xs text-gray-500 truncate">{char.description}</p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {renderRolePlaceholders(char.description, { character: char, user })}
+                  </p>
                 </div>
               </button>
             ))}
