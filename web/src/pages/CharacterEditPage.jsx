@@ -15,6 +15,14 @@ const FIELD_LABELS = {
   personality: { label: '性格设定', placeholder: '角色的性格特点、行为模式', type: 'textarea', rows: 3 },
   scenario: { label: '场景设定', placeholder: '当前故事背景或场景', type: 'textarea', rows: 2 },
   first_msg: { label: '开场白', placeholder: '角色在对话开始时说的第一句话', type: 'textarea', rows: 3 },
+  pov: {
+    label: '叙事视角',
+    type: 'select',
+    options: [
+      { value: 'second', label: '第二人称（界面显示为“你”）' },
+      { value: 'third', label: '第三人称（界面显示为用户名）' },
+    ],
+  },
   avatar_url: { label: '头像 URL', placeholder: 'https://...（可选）', type: 'input' },
   tags: { label: '标签', placeholder: '用逗号分隔，例如：女性,现代,温柔', type: 'input' },
 }
@@ -25,6 +33,7 @@ const FORM_FIELDS = [
   'personality',
   'scenario',
   'first_msg',
+  'pov',
   'avatar_url',
   'tags',
   'use_custom_user',
@@ -38,6 +47,7 @@ const EMPTY_FORM = {
   personality: '',
   scenario: '',
   first_msg: '',
+  pov: 'third',
   avatar_url: '',
   tags: '',
   use_custom_user: false,
@@ -162,6 +172,18 @@ export default function CharacterEditPage() {
                 rows={config.rows}
                 className="w-full input-base resize-none"
               />
+            ) : config.type === 'select' ? (
+              <select
+                value={form[key]}
+                onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                className="w-full input-base bg-surface"
+              >
+                {config.options.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             ) : (
               <input
                 type="text"
@@ -230,6 +252,7 @@ export default function CharacterEditPage() {
               </p>
             </div>
             <div className="text-right text-[11px] text-gray-500 whitespace-nowrap">
+              <p>视角 = {form.pov === 'second' ? '第二人称' : '第三人称'}</p>
               <p>{'{{char}}'} = {displayCharacterName}</p>
               <p>{'{{user}}'} = {displayUserName}</p>
             </div>

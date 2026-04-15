@@ -13,6 +13,7 @@ type Character struct {
 	FirstMsg      string    `json:"first_msg" db:"first_msg"`
 	AvatarURL     string    `json:"avatar_url" db:"avatar_url"`
 	Tags          string    `json:"tags" db:"tags"`
+	POV           string    `json:"pov" db:"pov"`
 	UseCustomUser bool      `json:"use_custom_user" db:"use_custom_user"`
 	UserName      string    `json:"user_name" db:"user_name"`
 	UserDetail    string    `json:"user_detail" db:"user_detail"`
@@ -29,6 +30,7 @@ type CharacterDraft struct {
 	FirstMsg      string `json:"first_msg"`
 	AvatarURL     string `json:"avatar_url"`
 	Tags          string `json:"tags"`
+	POV           string `json:"pov"`
 	UseCustomUser bool   `json:"use_custom_user"`
 	UserName      string `json:"user_name"`
 	UserDetail    string `json:"user_detail"`

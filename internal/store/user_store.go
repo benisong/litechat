@@ -251,15 +251,15 @@ func (s *UserStore) EnsureInitialUsers() error {
 func (s *UserStore) CreateDefaultCharacter(userID string) {
 	now := time.Now()
 	_, err := s.db.Exec(`
-		INSERT OR IGNORE INTO characters (id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT OR IGNORE INTO characters (id, user_id, name, description, personality, scenario, first_msg, avatar_url, tags, pov, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		uuid.New().String(), userID,
 		"小助手",
 		"一个友善的 AI 聊天助手，喜欢帮助别人解决问题。",
 		"温柔、耐心、幽默，说话简洁有条理。偶尔会开小玩笑活跃气氛。",
 		"你正在和用户进行一对一的文字聊天。",
 		"你好呀！我是小助手，有什么我可以帮你的吗？😊",
-		"", "助手,默认", now, now,
+		"", "助手,默认", "second", now, now,
 	)
 	if err != nil {
 		log.Printf("创建默认角色卡失败: %v", err)

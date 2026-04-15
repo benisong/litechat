@@ -64,6 +64,7 @@ func (db *DB) InitSchema() error {
 		first_msg       TEXT DEFAULT '',
 		avatar_url      TEXT DEFAULT '',
 		tags            TEXT DEFAULT '',
+		pov             TEXT DEFAULT 'third',
 		use_custom_user INTEGER DEFAULT 0,
 		user_name       TEXT DEFAULT '',
 		user_detail     TEXT DEFAULT '',
@@ -237,6 +238,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
 	db.Exec(`ALTER TABLE users ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE users ADD COLUMN user_detail TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE characters ADD COLUMN pov TEXT DEFAULT 'third'`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN use_custom_user INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
@@ -248,6 +250,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE presets ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`UPDATE characters SET pov = 'third' WHERE pov = '' OR pov IS NULL`)
 	db.Exec(`UPDATE users SET user_name = 'user' WHERE role = 'user' AND (user_name = '' OR user_name IS NULL)`)
 	db.Exec(`DELETE FROM configs WHERE key IN ('default_user_name', 'default_user_detail')`)
 	db.Exec(`

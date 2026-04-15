@@ -3,7 +3,15 @@ function normalizeDisplayName(value, fallback) {
   return text || fallback
 }
 
+function normalizeCharacterPov(character) {
+  return character?.pov === 'second' ? 'second' : 'third'
+}
+
 export function resolveUserDisplayName(character, user) {
+  if (normalizeCharacterPov(character) === 'second') {
+    return '你'
+  }
+
   if (character?.use_custom_user) {
     const customUserName = String(character?.user_name || '').trim()
     if (customUserName) return customUserName

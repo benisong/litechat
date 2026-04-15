@@ -52,8 +52,8 @@ var characterPersonalityOptions = map[string]templateChoiceOption{
 }
 
 var characterPOVOptions = map[string]templateChoiceOption{
-	"second": {Label: "第二人称", Hint: "开场白和叙事更偏沉浸式体验，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“你”。"},
-	"third":  {Label: "第三人称", Hint: "叙事更有镜头感和空间感，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“他/她/ta”。"},
+	"second": {Label: "第二人称", Hint: "开场白和叙事更偏沉浸式体验，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“你”；同时句式要保证 {{user}} 最终显示成“你”时依然自然。"},
+	"third":  {Label: "第三人称", Hint: "叙事更有镜头感和空间感，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“他/她/ta”；同时句式要保证 {{user}} 最终显示成用户名时依然自然。"},
 }
 
 const characterCardSystemPrompt = `你是资深中文角色卡作者，擅长写适合角色扮演聊天应用的高质量角色卡。
@@ -145,6 +145,7 @@ func (s *ChatService) GenerateCharacterCardDraft(req model.GenerateCharacterCard
 	if err != nil {
 		return nil, err
 	}
+	draft.POV = req.POV
 
 	return draft, nil
 }
@@ -177,10 +178,11 @@ func buildCharacterCardPrompt(gender, setting, storyType, personality, pov templ
 10. name 字段只负责定义主角色姓名；在 description、personality、scenario、first_msg 里，凡是提到主角色都必须写 {{char}}，不要直接写 name 字段里的名字。
 11. 在 description、personality、scenario、first_msg 里，凡是提到聊天用户都必须写 {{user}}，不要自造用户名字。
 12. 不要直接使用“你”“你们”“您”“他”“她”“他们”“她们”“ta”“TA”“对方”等模糊指代来表示用户或主角色。
-13. 这条占位符规则优先级最高；输出前逐字段自检，若正文四个字段里出现主角色真实名字、模糊代词、或不是 {{char}} / {{user}} 的角色指代，必须改写后再输出。
-14. 内容要更接近高质量角色卡站常见写法：信息密度高、人物感强、张力明确、世界感成立。
-15. tags 重点覆盖人物气质、关系张力、题材世界观和互动风格。
-16. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段正文。`)
+13. 如果叙事视角是第二人称，正文句式必须保证 {{user}} 在界面里显示为“你”后仍然自然；如果是第三人称，正文句式必须保证 {{user}} 显示为用户名称后仍然自然。
+14. 这条占位符规则优先级最高；输出前逐字段自检，若正文四个字段里出现主角色真实名字、模糊代词、或不是 {{char}} / {{user}} 的角色指代，必须改写后再输出。
+15. 内容要更接近高质量角色卡站常见写法：信息密度高、人物感强、张力明确、世界感成立。
+16. tags 重点覆盖人物气质、关系张力、题材世界观和互动风格。
+17. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段正文。`)
 
 	return builder.String()
 }
