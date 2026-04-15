@@ -52,8 +52,8 @@ var characterPersonalityOptions = map[string]templateChoiceOption{
 }
 
 var characterPOVOptions = map[string]templateChoiceOption{
-	"second": {Label: "第二人称", Hint: "开场白和叙事更偏沉浸式体验，优先使用“你”，让读者直接在场。"},
-	"third":  {Label: "第三人称", Hint: "叙事更有镜头感和空间感，可自然使用 {{user}} 表示用户名字。"},
+	"second": {Label: "第二人称", Hint: "开场白和叙事更偏沉浸式体验，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“你”。"},
+	"third":  {Label: "第三人称", Hint: "叙事更有镜头感和空间感，但凡指向用户一律写 {{user}}，指向主角色一律写 {{char}}，不要直接写“他/她/ta”。"},
 }
 
 const characterCardSystemPrompt = `你是资深中文角色卡作者，擅长写适合角色扮演聊天应用的高质量角色卡。
@@ -73,9 +73,11 @@ const characterCardSystemPrompt = `你是资深中文角色卡作者，擅长写
 5. personality 必须写出核心性格、反差、说话方式、行为习惯、情绪触发点、底线、偏爱方式或弱点，不能只写几个形容词。
 6. scenario 必须写出当前故事背景和正在发生的场景，让人物所处世界立得住，同时能立刻接戏。
 7. first_msg 必须像角色卡站常见开场白，直接进入互动，带一点动作、氛围或台词，不要写字段名，不要解释。
-8. 除 {{user}} 外，不要输出任何占位符或元信息。
-9. tags 输出 4 到 7 个简短中文标签，用逗号分隔。
-10. 不要输出 avatar_url、user_name、user_detail 等未要求字段。
+8. name 字段用于定义主角色姓名；description、personality、scenario、first_msg 里凡是指向主角色本人时，只能使用 {{char}}，不要直接重复 name 字段里的名字。
+9. description、personality、scenario、first_msg 里凡是指向聊天用户时，只能使用 {{user}}。
+10. 不要直接使用“你”“你们”“您”“他”“她”“他们”“她们”“ta”“TA”“对方”等模糊指代来表示主角色或用户，也不要输出其他占位符或元信息。
+11. tags 输出 4 到 7 个简短中文标签，用逗号分隔。
+12. 不要输出 avatar_url、user_name、user_detail 等未要求字段。
 
 输出格式必须严格如下：
 <character_card>
@@ -170,12 +172,15 @@ func buildCharacterCardPrompt(gender, setting, storyType, personality, pov templ
 7. 世界观必须是有独立感的：
    - 现实题材也要有明确的城市、圈层、行业、家庭或社会规则。
    - 架空题材要有清晰的权力结构、阵营、超凡规则、地域或生存秩序。
-8. scenario 建议写到 140 到 240 个中文字符，既要交代眼下所处环境，也要让人物背景和世界观自然落地，不能只是“你们相遇了”。
+8. scenario 建议写到 140 到 240 个中文字符，既要交代眼下所处环境，也要让人物背景和世界观自然落地，不能只是笼统写两人相遇。
 9. first_msg 建议写到 120 到 260 个中文字符，必须像真正能接着聊下去的开场：要有动作、语气、氛围和角色感，不要像说明书。
-10. second 视角时优先使用“你”；third 视角时可以自然使用 {{user}} 表示用户名字。
-11. 内容要更接近高质量角色卡站常见写法：信息密度高、人物感强、张力明确、世界感成立。
-12. tags 重点覆盖人物气质、关系张力、题材世界观和互动风格。
-13. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段正文。`)
+10. name 字段只负责定义主角色姓名；在 description、personality、scenario、first_msg 里，凡是提到主角色都必须写 {{char}}，不要直接写 name 字段里的名字。
+11. 在 description、personality、scenario、first_msg 里，凡是提到聊天用户都必须写 {{user}}，不要自造用户名字。
+12. 不要直接使用“你”“你们”“您”“他”“她”“他们”“她们”“ta”“TA”“对方”等模糊指代来表示用户或主角色。
+13. 这条占位符规则优先级最高；输出前逐字段自检，若正文四个字段里出现主角色真实名字、模糊代词、或不是 {{char}} / {{user}} 的角色指代，必须改写后再输出。
+14. 内容要更接近高质量角色卡站常见写法：信息密度高、人物感强、张力明确、世界感成立。
+15. tags 重点覆盖人物气质、关系张力、题材世界观和互动风格。
+16. 不要把字段内容写成“姓名：”“性格：”这种表单格式，只输出字段正文。`)
 
 	return builder.String()
 }
