@@ -430,6 +430,47 @@ func (s *ChatService) getUserDetail(char *model.Character, userID string) string
 	return userDetail
 }
 
+func (s *ChatService) getCharacterPOV(char *model.Character) string {
+	if char == nil {
+		return "third"
+	}
+	if strings.EqualFold(strings.TrimSpace(char.POV), "second") {
+		return "second"
+	}
+	return "third"
+}
+
+func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID string) string {
+	if char == nil {
+		return ""
+	}
+
+	charName := strings.TrimSpace(char.Name)
+	if charName == "" {
+		charName = "character"
+	}
+
+	userName := strings.TrimSpace(s.getUserName(char, userID))
+	if userName == "" {
+		userName = "user"
+	}
+
+	var builder strings.Builder
+	builder.WriteString("[Identity Anchor]\n")
+	builder.WriteString(fmt.Sprintf("- You are %s. Always roleplay as this character.\n", charName))
+	builder.WriteString(fmt.Sprintf("- The chat user is %s. Never roleplay as %s.\n", userName, userName))
+	builder.WriteString("- Never swap, merge, or confuse the identities of the character and the user.\n")
+	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to you, the character.\n", charName))
+	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to the user.\n", userName))
+	if s.getCharacterPOV(char) == "second" {
+		builder.WriteString(fmt.Sprintf("- This role card uses second-person POV for the user. If the role card addresses %s as \"you\", it still refers to the user, not to you.\n", userName))
+	} else {
+		builder.WriteString(fmt.Sprintf("- This role card uses third-person POV for the user. Mentions of %s still refer to the user, not to you.\n", userName))
+	}
+	builder.WriteString("- Keep this identity mapping stable for the entire conversation.")
+	return builder.String()
+}
+
 func (s *ChatService) replaceVars(template string, char *model.Character, userID string) string {
 	result := template
 
@@ -684,12 +725,16 @@ func (s *ChatService) buildMessages(chatID string, preset *model.Preset, char *m
 
 	// Step A: system_prompt=true 闂?闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閹冣挃闁硅櫕鎹囬垾鏃堝礃椤忎礁浜鹃柨婵嗙凹缁ㄥジ鏌熼惂鍝ョМ闁哄矉缍侀、姗€鎮欓幖顓燁棧闂備線娼уΛ娆戞暜閹烘缍栨繝闈涱儐閺呮煡鏌涘☉鍗炲妞ゃ儲鑹鹃埞鎴炲箠闁稿﹥顨嗛幈銊╂倻閽樺锛涘┑鐐村灍閹崇偤宕堕浣镐缓缂備礁顑嗙€笛囨倵椤掑嫭鈷戦柣鐔告緲閳锋梻绱掗鍛仸鐎规洘鍨块獮鍥偋閸垹骞堥梻浣哥秺閸嬪﹪宕滃▎鎴犳／鐟滄棃寮婚敐澶娢ч柛娑卞弾娴犲ジ姊虹€圭媭娼愰柛銊ョ埣閻涱喗绻濋崶銊у幈婵犵數鍊崘鈺佹缂備浇缈伴崐鏇㈡箒闂佺粯锚濡﹪宕曡箛娑欑厽闁靛牆楠搁弸鐔兼煏閸パ冾伃鐎殿喕绮欓、鏇綖椤撶姵宕熺紓鍌欒兌閸嬫捇宕曢幎瑙ｂ偓锕傛倻閽樺鐣哄┑掳鍊曢幊蹇涘疾閺屻儱绠圭紒顔炬嚀婢ф煡鏌ｈ箛鎾缎ф慨濠呮缁辨帒螣鐠囨煡鐎烘繝鐢靛仩鐏忔瑩宕伴弽褜鍤曢悹鍥ф▕閸氬顭跨捄鐚村姛闁告ê鎲＄换娑欐綇閸撗冨煂闂佽绁撮埀顒佹灱閺嬫棃鏌涢锝嗙闁抽攱鍨块弻鐔革紣娴ｄ警妲梺璇茬箚閸撴繄鎹㈠☉銏″殤妞ゆ巻鍋撻柡瀣〒閳ь剚顔栭崰娑㈩敋瑜旈崺銉﹀緞閹邦剦娼婇梺缁樕戦悥鐘诲炊閵娧冨箞闂備焦鏋奸弲娑㈠窗濮橆兘鏋旈柡鍐ｅ亾闁靛洤瀚伴、鏇㈡晲閸涱喛鐧佹繝娈垮枛閿曘儱顪冮挊澶屾殾妞ゆ劧绠戠粈瀣亜閹捐泛孝濠殿喚鏅槐鎾诲磼濮橆兘鍋撻崫銉х煋鐎规洖娲ㄩ惌鍡椼€掑锝呬壕濡炪們鍨哄畝鎼佸极閹邦厼绶炴俊顖滅帛濞呭矂姊绘担鍛婂暈婵炶绠撳畷鎴﹀幢濞戣鲸鏅╅梺鎼炲労閸撴岸鎮″▎鎾寸厱闊洦鑹炬禍褰掓煛閸℃﹫鑰块柡灞剧洴婵℃悂濡疯妤旈柣搴㈩問閸犳骞冮崒鐐靛祦閻庯綆鍠楅弲婊堟偡濞嗘瑧绋婚悗姘虫閳规垿鎮欓懜闈涙锭缂備浇寮撶划娆撶嵁濡も偓椤劑宕奸悢鍛婄彨闁诲骸绠嶉崕鍗灻洪妸褍顥氶柛蹇曨儠娴滄粓鏌￠崶鈺佷沪闁革絽缍婇弻锝堢疀閺囩偐鏋呴梺纭呮閻栧ジ骞冨▎鎾村€绘俊顖滃帶楠炲牓姊绘笟鈧埀顒佺☉瀹撳棙绻涙担鍐叉搐閸戠姵绻涢幋娆忕仾闁绘挶鍨介弻娑㈠箛閸忓摜鐩庨梺鍝勵儐濡啴寮婚悢鐓庣煑濠㈣泛顑呴埀顒佸姈椤ㄣ儵鎮欏顔煎壎闂佽鍠掗弲鐘茬暦濡ゅ懎浼犻柕澹嫬鏋撳┑鐘垫暩婵兘寮幖浣哥；闁绘劕鎼崹鍌涖亜閺嶎偄浠滈柛銊ュ€块弻娑㈡晜鐠囨彃绠绘繛鎴炴尭缁夋挳鍩為幋锔藉亹鐎规洖娴傞弳锟犳⒑缂佹ɑ灏版繛鑼枛瀵鎮㈤悡搴ｎ唹闂佸綊鍋婇崜娑樞掗姀銈嗏拺閻犲洠鈧櫕鐏堥梺闈涚墛閹倸顕ｆ繝姘嵆闁绘棁娅ｉ鏇㈡⒑缂佹ê濮﹂柛鎾村哺閹敻寮撮姀鈾€鎷洪梺瑙勫劶婵倝寮柆宥嗙厱闁靛鍎茬拹鈩冧繆閸欏濮嶆鐐村浮瀵剟宕崟顏勵棜闂備焦瀵х换鍌涱殽閹间胶宓佹俊銈呭暟濡垱銇勯幘璺轰粶妞わ絽纾槐鎺撴綇閵娿儲璇為梺璇″枓閺呯姴螞閸愩劉妲堥弶鍫涘妽閻︽梻绱撻崒姘偓鐑芥嚄閸撲礁鍨濇い鏍ㄧ矌閻瑩鏌熼幆褜鍤熸い鈺冨厴閺屻劑寮撮悙娴嬪亾閸濄儱顥氶柛蹇撳悑閸欏繑鎱ㄥΔ鈧Λ妤佹櫠婵犳碍鐓熼幖娣妽閺佽京绱掔紒妯肩畼闁哥姴锕よ灒鐎瑰嫰顣︽竟鏇㈡⒑閸涘﹤濮岄悘蹇旂懄椤ㄣ儵宕堕浣叉嫼闂佸憡绋戦敃銉╁煕閹扮増鐓熼柣鏂垮级濞呭﹪鏌熼璇插祮妞ゃ垺鐟╁畷鍙夊緞鐏炶姤鐏佹繛瀛樼矋閹倸顕ｉ崐鐕佹Ш婵犮垼顫夊ú鏍煘閹达附鍊烽柡澶嬪灩娴犵顪冮妶鍛濞存粠浜妴渚€寮崼婵嬪敹濡炪倖鍔х徊鎯р枍閸涘瓨鈷掑ù锝囧劋閸も偓婵犫拃鍛珪闁告帗甯￠、娑㈡倷閼碱剙骞堥梻浣侯攰閹活亪姊介崟顖涘亗闁哄洨鍠撶粻楣冩煙鐎电鍓抽柛蹇ｅ墴閺屾盯寮崒姘亖缂備浇椴哥敮锟犲箖閳哄懏鎯炴い鎰╁灮閿涙捇姊绘担绛嬪殐闁哥姵顨婇妴鍐川鏉堝墽绋忓┑鐘绘涧椤戝棝宕戦崒鐐茬閺夊牆澧界壕鍧楁煟椤愩垹顏慨濠勭帛閹峰懐绮电€ｎ亝鐣伴梻浣告憸婵敻銆冩繝鍥ラ柛鎰ㄦ櫇缁♀偓闂佺鏈划宥呪枔閹€鏀介柣妯款嚋瀹搞儲淇婇顐㈠箹閸楅亶鏌涢幘妤€鎳愰敍婊堟⒑缂佹ê濮﹂柛鎾寸懅缁牓宕橀埡鈧换鍡樸亜閹扳晛鐏╂い蹇ｅ幗缁绘繈鍩€椤掍胶鐟归柍褜鍓欓～蹇撁洪鍕唶闁硅壈鎻徊鍧楁偩閻㈠憡鈷戦柣鐔告緲閺嗛亶姊虹敮顔剧К婵☆偁鍨藉Λ鍛搭敃閵忊€愁槱闂佸搫鐫欓崨顔煎簥闂佺硶鍓濈粙鎺楁偂閺囩喓绠鹃柛鈩冾殕缁傚淇婇幓鎺旂Ш闁哄本娲熷畷鍫曞Ω瑜忛悿鍕⒑閸濆嫮鐒跨紒杈ㄦ礃缁傛帡鏁冮崒姘鳖槶閻熸粍绮撻幃妯绘綇閳哄啰锛濇繛杈剧到閹碱偅鐗庨梻浣哄劦閺呪晠宕规导鎼晪闁挎繂顦介弫瀣煃瑜滈崜鐔兼偘椤旂⒈娼ㄩ柍褜鍓欓悾宄拔旀担鍝ョ獮婵犵數濮崇粈渚€藟濮樿埖鈷掑ù锝勮濞兼帡鏌涢弴鐐典粵闁伙絿鍏樺铏圭磼濡鏆楅梺鍝ュУ閸旀骞戦姀鐘闁靛繒濮烽鍝勨攽閻樼粯娑ф俊顐ｇ矒瀹曟椽鎮欓悜妯锋嫼闂佸憡绻傜€氱兘宕曢幋锔界厱闁绘娅曠亸鍨繆閸欏濮嶆鐐村浮楠炲﹪鎼归锝庢閻庤娲橀敃銏′繆閹间焦鏅滈柛娆嶅劦閸嬫姊婚崒姘偓鐑芥嚄閸撲焦鍏滈柛顐ｆ礀濡ê銆掑锝呬壕閻庤娲橀崹鍧楃嵁濮椻偓楠炲洦鎷呴悷鎵В闂傚倷绶氬褔鎮ч崱妞㈡稑螖閸愵亞鐣堕梺鍦劋椤ㄥ棝宕愰崹顐ｅ弿婵☆垳顭堥崝姘攽椤旂厧鈧潡寮诲☉銏犵厴闁诡垎鍌氼棜婵犵绱曢崑鎴﹀磹閺嶎厼鍨傞柣鎾崇岸閺嬫牠鏌￠崶锝嗗殟闁搞儺鍓氶弲婵嬫煕鐏炲墽銆掗柛妯绘崌濮婃椽鎳為妷鍐句邯钘濋柦妯猴級閿濆宸濆┑鐐层仒缁ㄨ顪冮妶鍡楀Ё缂佹彃娼￠幆宀勫箳閺傚搫浜鹃悷娆忓缁€鈧悗瑙勬处閸撴繈鎮橀幒妤佲拺闁告稑锕︾粻鎾绘倵濮樼厧澧伴柡渚囧櫍椤㈡棃宕ㄩ婊呮缂備胶鍋撳姗€藝鏉堚晛顥氶柛褎顨嗛悡鏇㈡倵閿濆骸浜滈柣蹇擃嚟閳ь剝顫夊ú姗€宕濆▎蹇ｅ殨濞寸姴顑愰弫鍥煟閹邦収鍟忛柛鐐舵硾閳规垶骞婇柛濞у懎绶ゅù鐘差儏閻ゎ喗銇勯幇鈺佲偓鏇⑺夊杈╃＝濞达絽顫栭懖鈺傚床闁糕剝菧娴滄粓鏌″鍐ㄥ妞わ絾鐓￠弻?
 	var systemContent strings.Builder
+	identityPrompt := s.buildRoleIdentityPrompt(char, userID)
+	if identityPrompt != "" {
+		systemContent.WriteString(identityPrompt)
+	}
 	for _, e := range enabled {
 		if !e.SystemPrompt {
 			continue
 		}
 		if systemContent.Len() > 0 {
-			systemContent.WriteString("\n")
+			systemContent.WriteString("\n\n")
 		}
 		systemContent.WriteString(e.Content)
 	}
