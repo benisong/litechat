@@ -124,7 +124,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		firstMsg := &model.Message{
 			ChatID:  chatID,
 			Role:    "assistant",
-			Content: s.replaceVars(character.FirstMsg, character, userID),
+			Content: s.replaceRoleCardText(character.FirstMsg, character, userID),
 		}
 		if err := s.messageStore.Create(firstMsg); err != nil {
 			log.Printf("[闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳婀遍埀顒傛嚀鐎氼參宕崇壕瀣ㄤ汗闁圭儤鍨归崐鐐差渻閵堝棗绗掓い锔垮嵆瀵煡顢旈崼鐔蜂画濠电姴锕ら崯鎵不婵犳碍鐓曢柍瑙勫劤娴滅偓淇婇悙顏勨偓鏍暜婵犲洦鍤勯柛顐ｆ礀閻撴繈鏌熼崜褏甯涢柣鎾寸洴閺屾稑鈽夐崡鐐典哗闂佸疇顕ч悧鎾诲蓟閺囥垹骞㈤柡鍥╁濡差噣姊虹€圭媭鍤欓梺甯秮閻涱喖顫滈埀顒€鐣峰鈧獮鎾诲箳閹惧瓨顓瑰┑鐘殿暜缁辨洟宕戦幋锕€纾归柡宥庡幖缁犳澘螖閿濆懎鏆欑痪鎯ь煼閺岋綁寮崹顔藉€梺绋款儐閿曘垽寮婚弴鐔风窞闁糕剝蓱閻濇洟姊洪幎鑺ユ暠闁搞劌娼″璇测槈閵忊剝娅嗛柣鐘叉处瑜板啰绮昏ぐ鎺撯拺闁告稑锕ラ悡銉︺亜閹存繃顥㈠┑锛勬暬瀹曠喖顢涘В灏栨櫊閺屾洘寰勫☉姘辨殸濠电偛鎲為崟顓犵槇闂侀潧楠忕紞鍡楊焽閹邦厾绠鹃柛娆忣樈閻掍粙鏌熼獮鍨仼闁宠鍨垮畷閬嶅煛閸屾艾鍘炲┑锛勫亼閸婃牠骞愰悙顒佸弿闁圭虎鍠氬畵浣衡偓骞垮劚椤︿即鍩涢幒鎳ㄥ綊鏁愰崨顔兼殘闂佸摜鍠撻崑銈夊蓟閻旇櫣鐭欓柟绋垮瘨濡箓鎮楃憴鍕８闁告梹鍨块妴浣割潨閳ь剟骞冮鍫濈劦妞ゆ帒瀚壕鑽ゆ喐閺傛娼栧┑鐘宠壘绾惧吋绻涢崱妯虹瑨闁告﹫绱曠槐鎾寸瑹閸パ勭彯闂佹悶鍔岄悥濂告偘椤曗偓楠炲洭顢欓挊澶屽酱闂佽崵鍠嶅鎺楁倿閿曗偓椤啯绂掔€ｎ亞鐣洪梺闈涚箞閸婃牠宕戦崒鐐茬婵烇綆鍓欓埀顒佺墵楠炲瀵肩€涙ǚ鎷绘繛鎾村焹閸嬫挻绻涙担鍐叉椤ゅ倿姊绘担鍛婃儓闁瑰啿绻橀幆鍕敍濮樿鲸娈鹃梺璺ㄥ枔婵敻骞嗛悙娣簻闁规澘澧庨崚鎵偓娈垮枛閻忔繈鍩為幋锕€鐓￠柛鈩冾殘娴犫晠姊洪崷顓涙嫛闁稿锕獮濠傤煥閸喎浠梺閫涚祷濞呮洟寮埀顒勬⒒閸屾艾顏╂繛灞傚€涢悘瀣⒑閸涘﹥澶勯柛顭戜邯閸┾偓妞ゆ帊鐒﹂ˉ鍫⑩偓瑙勬礃閿曘垽銆佸▎鎾冲簥濠㈣鍨板ú锕傛偂閺囩喓绠鹃柟瀛樼箓閼稿綊鏌ｈ箛銉хɑ闁靛洤瀚板顒勫礌閳╁啯鏆扮紓鍌欒兌缁垳鎹㈤崒鐐茬厺闁规崘顕ч崹鍌涖亜閺冨倹娅曞ù婊堢畺濮婄粯鎷呴懞銉ｂ偓鍐煟閹虹偟鐣垫鐐插暣瀹曟帡鎮欓棃娑氥偊闂備胶顢婇幓顏嗙不閹达讣缍栭柛娑樼摠閻撶喐鎱ㄥΔ鈧Λ妤佺濠靛洢浜滄い鎰╁灮鏁堝┑顔硷攻濡炶棄螞閸愩劉妲堟慨姗€纭搁崬鍝勨攽閻樻剚鍟忛柛鐘冲哺瀵偆绱掑Ο鍦畾闂傚倸鐗婄粙鍫ュ绩娴犲鐓曢柕澶堝灪濞呭洦銇勯弮鈧ú鐔煎蓟閳╁啫绶炲┑鐘插椤ｇ儤绻濋埛鈧崨顔界彧缂備緡鍠楀Λ鍐€佸Δ浣瑰闁稿繐鎽滈惄搴繆閻愵亜鈧牠宕濋幋锕€鏄ラ柛鏇ㄥ€犻悢鐓庣劦妞ゆ帒瀚崐?婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柛娑橈攻閸欏繘鏌ｉ幋锝嗩棄闁哄绶氶弻娑樷槈濮楀牊鏁鹃梺鍛婄懃缁绘﹢寮婚敐澶婄闁挎繂妫Λ鍕⒑閸濆嫷鍎庣紒鑸靛哺瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁绘劦鍓欓崝銈嗙箾绾绡€鐎殿喖顭烽幃銏㈡偘閳ュ厖澹曢梺姹囧灪椤旀牠鎮為崜褉鍋撳☉娆戠畼缂佽鲸鎸婚幏鍛存偩鐏炵晫澧梻浣侯焾閿曘儳鎹㈤崼婵愬殨濠电姵纰嶉弲婵嬫煃瑜滈崜婵嬫倶閹烘挾绠鹃柟鐐綑閸ゎ剟鏌涢妸鈺€鎲鹃柡浣哥Ч瀹曞崬顪冪紒妯绘澑闂備胶绮崝鏇烆嚕閸洖鐓濋柡鍥╀紳閻熼偊鐓ラ柛鏇ㄥ幘閻ゅ嫰鎮楀▓鍨灍鐟滄澘鍟撮垾锕傚Ω閳轰線鍞堕梺缁樻煥閹碱偊鐛Δ鍛拻濞撴埃鍋撻柍褜鍓氱粙鎴濈暤閸℃绠惧ù锝呭暱鐎氼厼鈻嶉悩鐐戒簻闁哄洦顨呮禍鎯旈悩闈涗沪闁绘濮撮锝夊醇閺囩偟顓哄銈嗙墬缁诲倿骞嗛崼鐔虹瘈婵炲牆鐏濋弸娑㈡煥閺囨ê濡奸柍璇茬Ч閺佹劙宕惰閻忓﹤鈹戦悙鍙夘棡闁搞劏娉涢悾閿嬪緞閹邦厾鍘繝鐢靛€崘銊㈠亾閼姐倗鐭嗛柛鎰靛枟閳锋帡鏌涚仦鍓ф噯闁稿繐鏈妵鍕敇閻愰潧鈪靛銈冨灪閻楃姴鐣烽崼鏇ㄦ晢闁逞屽墰婢规洘绻濆顓犲帾闂佸壊鍋呯换鍐闯娴犲鐓涢柛鈽嗗幘閻ｇ敻鏌″畝鈧崰鎰焽韫囨稑绀堢憸蹇涘汲閻樼粯鐓曢柕澶堝劤閹界姷绱掔紒妯肩疄濠殿喒鍋撻梺鎸庣箓濡盯濡撮幇顒夋富闁靛牆妫楅悘銉︾箾瀹割喖骞栭柣锝囧厴婵偓闁靛牆瀛╅弲婊堟⒑閸涘﹣绶遍柛銊﹀▕閹線宕奸妷锔规嫼濠殿喚鎳撳ú銈夋倶閸欏绠惧ù锝呭暱閸熶即骞楅妷褏纾介柛灞捐壘閳ь剛鍏橀幊妤呭礈娴ｇ鐏婂銈嗙墬缁秹寮冲鍫熺叆闁绘柨鎼瓭缂備胶濮甸悧鐘诲蓟閿濆绠涢梻鍫熺☉椤亞绱撻崒姘毙㈡繛宸弮瀵顓兼径濠佺炊闂佸憡娲﹂崑鍛枔閸洘鈷戦柟绋挎捣閳洜绱掗鑺ュ碍妞ゎ偄绻愮叅妞ゅ繐瀚粣娑欑節閻㈤潧孝闁哥噥鍋婇幆宀勵敊閸撗咃紳婵炶揪绲捐ぐ鍐╃閻愵剛绠鹃弶鍫濆⒔閸掔増绻濋埀顒勬焼瀹ュ啠鍋撻崨瀛樺€婚柦妯侯槺妤犲洭姊洪崜鎻掍簼缁炬澘绉瑰鎯般亹閹烘挾鍘遍柣搴秵閸嬪懐浜搁銏＄厓缂備焦蓱瀹曞瞼鈧娲栫紞濠囥€佸▎鎾村仼閻忕偛銈搁崑妤呮⒒閸屾艾鈧兘鎳楅崜浣稿灊妞ゆ牜鍋為崑瀣節婵犲倻澧曢柛灞诲妿閹叉悂寮崼婵堢暫婵°倧绲介崯顖炴偂閵夆晜鍊甸柨婵嗛婢у瓨淇婄紒銏犳珝婵﹥妞藉畷銊︾節閸愩劎顣查柣搴㈩問閸犳牠鎮ラ悡搴殨闁圭粯宸婚弨浠嬫煕閳锯偓閺呮粎鈧潧鐭傚娲濞戞艾顣烘俊銈囧Т閹诧紕绮嬪鍡欘浄閻庯綆鍋嗛崢鍗炩攽閳藉棗鐏″ù婊€绮欏畷鎴﹀閳垛晛浜鹃悷娆忓缁€鍫ユ煛娴ｅ壊鐓肩€殿喖顭峰畷鍗炍旀繝鍌涘€梻浣虹《閸撴繈鎮烽妷鈺冨祦? %v", err)
@@ -463,12 +463,54 @@ func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID stri
 	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to you, the character.\n", charName))
 	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to the user.\n", userName))
 	if s.getCharacterPOV(char) == "second" {
-		builder.WriteString(fmt.Sprintf("- This role card uses second-person POV for the user. If the role card addresses %s as \"you\", it still refers to the user, not to you.\n", userName))
+		builder.WriteString(fmt.Sprintf("- This role card may use second-person wording in the scenario or first message. If it uses \"you\" or \"你\", it refers to %s, the user, not to you.\n", userName))
+		builder.WriteString(fmt.Sprintf("- When writing normal narration, action description, inner thoughts, or dialogue addressed to the user, prefer \"你\" instead of repeatedly using %s as the subject.\n", userName))
+		builder.WriteString(fmt.Sprintf("- Only use %s as a literal name when the scene explicitly requires the name itself, such as letters, forms, signatures, quoted text, roll call, or deliberate emphasis.\n", userName))
 	} else {
 		builder.WriteString(fmt.Sprintf("- This role card uses third-person POV for the user. Mentions of %s still refer to the user, not to you.\n", userName))
 	}
 	builder.WriteString("- Keep this identity mapping stable for the entire conversation.")
 	return builder.String()
+}
+
+func replaceRoleRefs(text, charName, userRef string) string {
+	text = strings.ReplaceAll(text, "{{user}}", userRef)
+	text = strings.ReplaceAll(text, "{{User}}", userRef)
+	text = strings.ReplaceAll(text, "{{char}}", charName)
+	text = strings.ReplaceAll(text, "{{Char}}", charName)
+	return text
+}
+
+func (s *ChatService) getRoleCardUserReference(char *model.Character, userID string) string {
+	if s.getCharacterPOV(char) == "second" {
+		return "你"
+	}
+
+	userName := strings.TrimSpace(s.getUserName(char, userID))
+	if userName == "" {
+		return "user"
+	}
+	return userName
+}
+
+func (s *ChatService) replaceRoleCardText(text string, char *model.Character, userID string) string {
+	if char == nil {
+		return text
+	}
+
+	charName := strings.TrimSpace(char.Name)
+	if charName == "" {
+		charName = "character"
+	}
+
+	result := replaceRoleRefs(text, charName, s.getRoleCardUserReference(char, userID))
+	now := time.Now()
+	result = strings.ReplaceAll(result, "{{time}}", now.Format("15:04"))
+	result = strings.ReplaceAll(result, "{{date}}", now.Format("2006-01-02"))
+	result = strings.ReplaceAll(result, "{{weekday}}", now.Weekday().String())
+	result = strings.ReplaceAll(result, "{{isotime}}", now.Format(time.RFC3339))
+	result = strings.ReplaceAll(result, "{{time_UTC}}", now.UTC().Format("15:04"))
+	return processDynamicMacros(result)
 }
 
 func (s *ChatService) replaceVars(template string, char *model.Character, userID string) string {
@@ -480,11 +522,7 @@ func (s *ChatService) replaceVars(template string, char *model.Character, userID
 		userName = char.UserName
 	}
 	resolveRoleRefs := func(text string) string {
-		text = strings.ReplaceAll(text, "{{user}}", userName)
-		text = strings.ReplaceAll(text, "{{User}}", userName)
-		text = strings.ReplaceAll(text, "{{char}}", char.Name)
-		text = strings.ReplaceAll(text, "{{Char}}", char.Name)
-		return text
+		return replaceRoleRefs(text, char.Name, userName)
 	}
 	result = resolveRoleRefs(result)
 
@@ -517,7 +555,7 @@ func (s *ChatService) replaceVars(template string, char *model.Character, userID
 	}
 	result = strings.ReplaceAll(result, "{{description}}", descWithUserInfo)
 	result = strings.ReplaceAll(result, "{{personality}}", resolveRoleRefs(char.Personality))
-	result = strings.ReplaceAll(result, "{{scenario}}", resolveRoleRefs(char.Scenario))
+	result = strings.ReplaceAll(result, "{{scenario}}", s.replaceRoleCardText(char.Scenario, char, userID))
 	result = resolveRoleRefs(result)
 
 	// 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閹冣挃闁硅櫕鎹囬垾鏃堝礃椤忎礁浜鹃柨婵嗙凹缁ㄥジ鏌熼惂鍝ョМ闁哄矉缍侀、姗€鎮欓幖顓燁棧闂備線娼уΛ娆戞暜閹烘缍栨繝闈涱儐閺呮煡鏌涘☉鍗炲妞ゃ儲鑹鹃埞鎴炲箠闁稿﹥顨嗛幈銊╂倻閽樺锛涢梺缁樺姉閸庛倝宕戠€ｎ喗鐓熸俊顖濆吹濠€浠嬫煃瑜滈崗娑氭濮橆剦鍤曢柟缁㈠枛椤懘鏌嶉埡浣告殲闁绘繃鐗犲缁樼瑹閳ь剟鍩€椤掑倸浠滈柤娲诲灡閺呭爼骞橀鐣屽幍濡炪倖鏌ㄩ崥瀣磻閵夛负浜滈柕蹇ョ磿閹冲嫰鏌熸笟鍨妤犵偛娲、鏃堝幢濞嗘劖娅掗梻鍌氬€搁崐宄懊归崶顒婄稏濠㈣泛顭悢鍡樻叏濡炶浜鹃梺璇″枔閸庣敻骞冮埄鍐╁劅妞ゆ棃鏁崑鎾绘嚋閻愰€涚盎闂佸搫娲﹂〃鍛妤ｅ啯鈷戦柛婵嗗濠€鎵磼鐎ｎ偅宕岄柛鈹惧亾濡炪倖甯掗敃锔剧矓闂堟耽鐟邦煥閸℃銆愰柧浼欑秮閺屽秷顧侀柛鎾跺枎椤繐煤椤忓嫪绱堕梺鍛婃处閸橀箖宕濋崷顓犵＝闁稿本姘ㄥ皬缂備浇鍩栧畝鎼佸箖娴兼惌鏁婄痪鎷岄哺瀵ゆ椽姊洪柅鐐茶嫰婢ь噣鏌ｉ敐鍛Щ閾伙絽銆掑鐓庣仩闁哄懐濮撮—鍐Χ閸℃鍙嗛梺鍛婅壘椤戝顕ｉ幎钘夋閹煎瓨鎸婚弬鈧梻浣虹帛閿氶柣蹇斿哺瀵娊鍩￠崨顔惧幈闁诲函缍嗛崜娆愮鏉堚斁鍋撶憴鍕缂傚秴锕妴浣糕槈閵忊€斥偓鐑芥煙缂佹ê绗ч柍褜鍓﹂崣鍐箖瀹勯偊鐓ラ柛娑卞弾閺嗩參鏌ｉ姀鈺佺仭妞ゃ劌锕獮鍐晸閻樺弬銊╂煃閸濆嫬鈧宕㈤鍫熲拺闁告挻褰冩禍婵堢磼鐠囨彃鏆ｉ挊鐔哥箾閸℃ê鐏╃痪鎯с偢閹綊宕惰缁狙勩亜閵夛絽鐏查柡宀嬬磿娴狅箓鎮欓鍌ゆЧ闁诲氦顫夊ú婊堝储瑜旈崺鐐哄箣閿曗偓楠炪垽鐓崶銊﹀矮濠㈣娲熷娲川婵犲嫧妲堥梺鎸庢穿缁犳捇濡撮崨鏉戣摕闁靛濡囬崢閬嶆⒑閸︻厼浜炬い銊ユ嚇楠炲﹪骞囬悧鍫熸珫濠电娀娼уú銊х不妤ｅ啯鐓欓柛鎾楀本顥撴繝銏ｎ潐钃辩紒缁樼〒娴狅箓宕掑锝呬壕闁哄稁鍋嗛惌澶屸偓骞垮劚閹峰鎮￠妷鈺傜厱婵炴垵宕悘锝夋煥濞戞瑧鐭嬬紒缁樼箞婵偓闁挎繂妫涢妴鎰版⒑閹稿孩绌垮┑鈥虫川閸掓帡寮崼鐔稿劒闂佺绻愰ˇ顖涚閻愵剛绠鹃柛顐ｇ箘娴犮垽鏌＄€ｎ偆鈯曢柕鍥у椤㈡﹢鎮欓崣澹晛顪冮妶鍡樼┛缂傚秳绶氶悰顔碱潨閳ь剟銆佸▎鎾村癄濠㈣泛顦遍惄搴㈢節绾板纾块柛瀣洴椤㈡牠宕ㄩ鐓庣秺閹粓鎳為妷銉ょ钵婵＄偑鍊栧濠氬疾椤愩倕濮柍褜鍓熷鍝勑ч崶褏浼堝┑鐐板尃閸曨収娴勯梺鎸庢礀閸婂綊鎮￠弴鐔翠簻妞ゆ挾鍠庨悘銉╂煟韫囥儱顩柍褜鍓濋～澶娒哄鍫濈疇闁规崘娉涘鍙変繆閻愵亜鈧洜鎹㈤幇顔剧煋闁汇垻顭堥悿鐐箾閹存瑥鐏柛濠傜仛椤ㄣ儵鎮欓懠顑胯檸闂佸憡姊圭喊宥夊Φ閸曨垱鏅滈柛顭戝枛缁侇噣姊虹化鏇熸珕闁烩晩鍨堕悰顔锯偓锝庡枟閸嬫劙鏌ｉ姀銏╂殰缂佸崬寮舵穱濠囨倷椤忓嫧鍋撻弽顓熷亱婵°倕鍟伴惌娆撴煙閻戞ɑ鈷掗柣顓炴閺屾盯骞囬妸锔界彇缂備胶濞€缁犳牠寮诲☉妯锋闁告鍋涚粻娲⒑閹肩偛鈧洖煤椤撱垹钃熼柨娑樺濞岊亪鏌涢幘妞诲亾濠殿喖娲ㄧ槐鎾存媴閾忕懓绗＄紓浣筋嚙閻楀棝鎮鹃悜钘夌闁瑰瓨姊归～宥呪攽閳藉棗鐏ユい顐㈩槸铻ｅ┑鐘叉处閳锋垿鎮归崶銊ョ祷妞ゆ帇鍨洪妵鍕籍閳ь剟鎮ч悩鑼殾闁哄绨卞Σ鍫ユ煏韫囧﹥娅嗛柡鍜佷邯閹嘲顭ㄩ崟顒夋閻庤娲樺鑺ヤ繆閻戣姤鏅濋柍褜鍓涘▎銏ゆ倷濞村鏂€闂佺粯鍔︽禍婊堟倶椤曗偓閺屾盯鎮╁畷鍥р拰閻庢鍠栭…閿嬩繆濮濆矈妲烽梺绋款儐閹瑰洭寮幇顓熷劅闁炽儱鍟跨粻锝夋⒒娴ｄ警鐒炬い鎴濇楠炴劙鎳￠妶鍡楀簥濠电娀娼уΛ顓烆焽閳哄倶浜滈柟鎯ь嚟閳洟鎮楀顑惧仮婵﹦绮粭鐔煎焵椤掆偓椤洭鎳￠妶鍌氫壕闂傚牊绋撻悞鍝モ偓瑙勬磸閸ㄨ櫣缂撴禒瀣闁绘劏鏅涙禍楣冩煕鐏炲墽銆掗梻鍕閺屾稑鈽夊鍫濆闂佸憡锕㈡禍鍫曞蓟閻斿吋鍤冮柍鍝勫濡牓姊洪崫鍕垫Ц闁靛洦锕㈠畷姘跺箳濡や讲鎷绘繛杈剧秬濞咃綁濡存繝鍥ㄧ厸闁稿本鐟х粣鏃傗偓瑙勬礃閸ㄥ潡鐛鈧獮鍥ㄦ媴閻熸壆妲ｉ梻鍌欑窔濞佳囨偋閸℃あ娑樜旈崨顓㈡暅婵犵數濮村ú锕傛偂閺囥垺鍊甸柨婵嗛娴滄繈鎮樿箛鏂款棆缂佽鲸甯炵槐鎺懳熺粭琛″亾閹烘挾绠鹃柟瀛樼箘娴犳稒銇勯敂鎯ь暭闁诡垱妫冮弫鎰板炊椤垶缍嬮梻?
@@ -656,7 +694,7 @@ func (s *ChatService) buildMessages(chatID string, preset *model.Preset, char *m
 	var recentHistory []model.ChatCompletionMessage
 	if char.FirstMsg != "" && len(history) == 0 {
 		recentHistory = append(recentHistory, model.ChatCompletionMessage{
-			Role: "assistant", Content: s.replaceVars(char.FirstMsg, char, userID),
+			Role: "assistant", Content: s.replaceRoleCardText(char.FirstMsg, char, userID),
 		})
 	} else {
 		for _, msg := range trimmedHistory {
