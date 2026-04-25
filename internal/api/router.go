@@ -20,6 +20,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 
 	// 公开路由（不需要认证）
 	r.POST("/api/auth/login", h.Login)
+	r.POST("/api/integrations/napcat/callback", h.HandleNapCatCallback)
 
 	// API 路由组（需要 JWT 认证）
 	api := r.Group("/api")
@@ -80,6 +81,18 @@ func SetupRouter(h *Handlers) *gin.Engine {
 
 		// 模型列表（仅管理员）
 		api.GET("/models", AdminOnly(), h.FetchModels)
+
+		// NapCat whitelist (admin only)
+		api.GET("/integrations/napcat/whitelist", AdminOnly(), h.ListNapCatWhitelist)
+		api.POST("/integrations/napcat/whitelist", AdminOnly(), h.CreateNapCatWhitelist)
+		api.PUT("/integrations/napcat/whitelist/:id", AdminOnly(), h.UpdateNapCatWhitelist)
+		api.DELETE("/integrations/napcat/whitelist/:id", AdminOnly(), h.DeleteNapCatWhitelist)
+		api.GET("/integrations/napcat/owner", AdminOnly(), h.GetNapCatOwner)
+		api.PUT("/integrations/napcat/owner", AdminOnly(), h.UpdateNapCatOwner)
+		api.GET("/integrations/napcat/config", AdminOnly(), h.GetNapCatConfig)
+		api.PUT("/integrations/napcat/config", AdminOnly(), h.UpdateNapCatConfig)
+		api.GET("/integrations/napcat/friends", AdminOnly(), h.ListNapCatFriends)
+		api.PUT("/integrations/napcat/whitelist/bulk", AdminOnly(), h.ReplaceNapCatWhitelist)
 	}
 
 	return r

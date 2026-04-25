@@ -16,15 +16,18 @@ import (
 
 // Handlers 所有 API 处理器的集合
 type Handlers struct {
-	characterStore *store.CharacterStore
-	chatStore      *store.ChatStore
-	messageStore   *store.MessageStore
-	presetStore    *store.PresetStore
-	worldBookStore *store.WorldBookStore
-	configStore    *store.ConfigStore
-	userStore      *store.UserStore
-	chatService    *service.ChatService
-	summaryService *service.SummaryService
+	characterStore         *store.CharacterStore
+	chatStore              *store.ChatStore
+	messageStore           *store.MessageStore
+	presetStore            *store.PresetStore
+	worldBookStore         *store.WorldBookStore
+	configStore            *store.ConfigStore
+	userStore              *store.UserStore
+	channelStore           *store.ChannelStore
+	chatService            *service.ChatService
+	channelDispatchService *service.ChannelDispatchService
+	napCatAdminService     *service.NapCatAdminService
+	summaryService         *service.SummaryService
 }
 
 func NewHandlers(
@@ -35,19 +38,25 @@ func NewHandlers(
 	worldBookStore *store.WorldBookStore,
 	configStore *store.ConfigStore,
 	userStore *store.UserStore,
+	channelStore *store.ChannelStore,
 	chatService *service.ChatService,
+	channelDispatchService *service.ChannelDispatchService,
+	napCatAdminService *service.NapCatAdminService,
 	summaryService *service.SummaryService,
 ) *Handlers {
 	return &Handlers{
-		characterStore: characterStore,
-		chatStore:      chatStore,
-		messageStore:   messageStore,
-		presetStore:    presetStore,
-		worldBookStore: worldBookStore,
-		configStore:    configStore,
-		userStore:      userStore,
-		chatService:    chatService,
-		summaryService: summaryService,
+		characterStore:         characterStore,
+		chatStore:              chatStore,
+		messageStore:           messageStore,
+		presetStore:            presetStore,
+		worldBookStore:         worldBookStore,
+		configStore:            configStore,
+		userStore:              userStore,
+		channelStore:           channelStore,
+		chatService:            chatService,
+		channelDispatchService: channelDispatchService,
+		napCatAdminService:     napCatAdminService,
+		summaryService:         summaryService,
 	}
 }
 

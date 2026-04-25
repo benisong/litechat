@@ -141,6 +141,41 @@ func (db *DB) InitSchema() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS channel_whitelist (
+		id               TEXT PRIMARY KEY,
+		provider         TEXT NOT NULL,
+		self_id          TEXT DEFAULT '',
+		external_user_id TEXT NOT NULL,
+		display_name     TEXT DEFAULT '',
+		note             TEXT DEFAULT '',
+		enabled          INTEGER DEFAULT 1,
+		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS channel_sessions (
+		id                  TEXT PRIMARY KEY,
+		provider            TEXT NOT NULL,
+		self_id             TEXT DEFAULT '',
+		external_user_id    TEXT NOT NULL,
+		owner_user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		active_character_id TEXT DEFAULT '',
+		active_chat_id      TEXT DEFAULT '',
+		state               TEXT DEFAULT 'idle',
+		created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS channel_chat_links (
+		id               TEXT PRIMARY KEY,
+		provider         TEXT NOT NULL,
+		self_id          TEXT DEFAULT '',
+		external_user_id TEXT NOT NULL,
+		owner_user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		chat_id          TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 
 	CREATE TABLE IF NOT EXISTS chat_summary_state (
 		chat_id                 TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
@@ -217,6 +252,10 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_prompt_suffix', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('napcat_owner_user_id', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('napcat_api_base_url', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('napcat_access_token', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('napcat_enabled', 'false');
 	`
 
 	_, err := db.Exec(schema)
@@ -268,6 +307,15 @@ func (db *DB) InitSchema() error {
 
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq)`); err != nil {
 		return fmt.Errorf("创建消息顺序索引失败: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_whitelist_unique ON channel_whitelist(provider, self_id, external_user_id)`); err != nil {
+		return fmt.Errorf("创建渠道白名单唯一索引失败: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_sessions_unique ON channel_sessions(provider, self_id, external_user_id)`); err != nil {
+		return fmt.Errorf("创建渠道会话唯一索引失败: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_chat_links_unique ON channel_chat_links(provider, self_id, external_user_id, chat_id)`); err != nil {
+		return fmt.Errorf("创建渠道聊天映射唯一索引失败: %w", err)
 	}
 
 	log.Println("数据库结构初始化完成")

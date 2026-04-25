@@ -85,6 +85,22 @@ func (s *UserStore) GetByUsernameAndMode(username, mode string) (*model.User, er
 	return user, nil
 }
 
+// GetFirstNonAdminByMode returns the oldest non-admin user under a mode.
+func (s *UserStore) GetFirstNonAdminByMode(mode string) (*model.User, error) {
+	user := &model.User{}
+	err := s.db.QueryRow(`
+		SELECT id, username, password_hash, role, mode, user_name, user_detail, created_at, updated_at
+		FROM users
+		WHERE role != 'admin' AND mode = ?
+		ORDER BY created_at ASC
+		LIMIT 1`, mode,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.Mode, &user.UserName, &user.UserDetail, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 // List 查询所有用户（按当前模式过滤，admin 始终可见）
 func (s *UserStore) List(mode string) ([]*model.User, error) {
 	rows, err := s.db.Query(`
@@ -243,6 +259,26 @@ func (s *UserStore) EnsureInitialUsers() error {
 	}
 	log.Printf("已创建服务模式用户: user1 (密码: user)")
 	s.CreateDefaultCharacter(serviceUser.ID)
+
+	qqSvcHash, err := auth.HashPassword("qqsvc")
+	if err != nil {
+		return fmt.Errorf("生成 qqsvc 密码哈希失败: %w", err)
+	}
+	qqSvcUser := &model.User{
+		Username:     "qqsvc",
+		PasswordHash: qqSvcHash,
+		Role:         "user",
+		Mode:         s.GetCurrentMode(),
+		UserName:     "QQ用户",
+	}
+	if err := s.Create(qqSvcUser); err != nil {
+		return fmt.Errorf("创建 qqsvc 用户失败: %w", err)
+	}
+	log.Printf("已创建 NapCat 默认承载用户: qqsvc (密码: qqsvc)")
+	s.CreateDefaultCharacter(qqSvcUser.ID)
+	_, _ = s.db.Exec(`
+		INSERT OR IGNORE INTO configs (key, value, updated_at) VALUES (?, ?, ?)
+	`, "napcat_owner_user_id", qqSvcUser.ID, time.Now())
 
 	return nil
 }

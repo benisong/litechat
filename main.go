@@ -44,6 +44,7 @@ func main() {
 	configStore := store.NewConfigStore(db)
 	userStore := store.NewUserStore(db)
 	summaryStore := store.NewSummaryStore(db)
+	channelStore := store.NewChannelStore(db)
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {
@@ -53,12 +54,17 @@ func main() {
 	summaryService := service.NewSummaryService(messageStore, summaryStore, configStore, userStore)
 	summaryService.Start()
 	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore, summaryService)
+	channelDispatchService := service.NewChannelDispatchService(characterStore, chatStore, channelStore, configStore, userStore)
+	napCatAdminService := service.NewNapCatAdminService(channelStore, configStore)
 
 	handlers := api.NewHandlers(
 		characterStore, chatStore, messageStore,
 		presetStore, worldBookStore, configStore,
 		userStore,
+		channelStore,
 		chatService,
+		channelDispatchService,
+		napCatAdminService,
 		summaryService,
 	)
 
