@@ -1,12 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, MoreVertical, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowDown, ChevronLeft, MoreVertical, RefreshCw, Trash2 } from 'lucide-react'
 import { useAuthStore, useChatStore, useCharacterStore, useUIStore, getToken } from '../store'
 import MessageBubble from '../components/chat/MessageBubble'
 import ChatInput from '../components/chat/ChatInput'
 import Avatar from '../components/ui/Avatar'
 import Modal from '../components/ui/Modal'
 import { renderRolePlaceholders } from '../utils/placeholderRender'
+
+const BOTTOM_THRESHOLD = 96
+const REATTACH_THRESHOLD = 8
 
 function getAuthHeaders() {
   try {
@@ -38,13 +41,74 @@ export default function ChatPage() {
   const [character, setCharacter] = useState(null)
   const [showMenu, setShowMenu] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const messagesEndRef = useRef(null)
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false)
+  const messagesContainerRef = useRef(null)
+  const stickToBottomRef = useRef(true)
+  const touchStartYRef = useRef(null)
+
+  const getDistanceToBottom = () => {
+    const container = messagesContainerRef.current
+    if (!container) return 0
+
+    return Math.max(0, container.scrollHeight - container.scrollTop - container.clientHeight)
+  }
+
+  const updateBottomState = () => {
+    const container = messagesContainerRef.current
+    const canScroll = Boolean(container && container.scrollHeight > container.clientHeight + 1)
+    const threshold = stickToBottomRef.current ? BOTTOM_THRESHOLD : REATTACH_THRESHOLD
+    const pinned = !canScroll || getDistanceToBottom() <= threshold
+
+    stickToBottomRef.current = pinned
+    setShowJumpToBottom(canScroll && !pinned)
+  }
+
+  const pauseAutoScroll = () => {
+    const container = messagesContainerRef.current
+    if (!container || container.scrollHeight <= container.clientHeight + 1) return
+
+    stickToBottomRef.current = false
+    setShowJumpToBottom(true)
+  }
+
+  const handleWheel = event => {
+    if (event.deltaY < 0) {
+      pauseAutoScroll()
+    }
+  }
+
+  const handleTouchStart = event => {
+    touchStartYRef.current = event.touches[0]?.clientY ?? null
+  }
+
+  const handleTouchMove = event => {
+    const touchStartY = touchStartYRef.current
+    const touchY = event.touches[0]?.clientY
+
+    if (touchStartY === null || touchY === undefined) return
+
+    if (touchY - touchStartY > 8) {
+      pauseAutoScroll()
+    }
+  }
 
   const scrollToBottom = (behavior = 'auto') => {
-    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' })
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    container.scrollTo({ top: container.scrollHeight, behavior })
+  }
+
+  const jumpToBottom = () => {
+    stickToBottomRef.current = true
+    setShowJumpToBottom(false)
+    requestAnimationFrame(() => scrollToBottom('auto'))
   }
 
   useEffect(() => {
+    stickToBottomRef.current = true
+    setShowJumpToBottom(false)
+
     const loadChat = async () => {
       const headers = getAuthHeaders()
       const res = await fetch(`/api/chats/${chatId}`, { headers })
@@ -77,11 +141,17 @@ export default function ChatPage() {
   }, [chatId])
 
   useEffect(() => {
-    scrollToBottom('smooth')
-  }, [messages])
+    if (!stickToBottomRef.current) return
+
+    requestAnimationFrame(() => {
+      scrollToBottom('auto')
+    })
+  }, [messages, streaming])
 
   useEffect(() => {
     const restoreBottomActions = () => {
+      if (!stickToBottomRef.current) return
+
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           scrollToBottom('auto')
@@ -107,6 +177,9 @@ export default function ChatPage() {
   }, [])
 
   const handleSend = async content => {
+    stickToBottomRef.current = true
+    setShowJumpToBottom(false)
+
     try {
       await sendMessage(chatId, content)
     } catch (err) {
@@ -160,7 +233,7 @@ export default function ChatPage() {
   const showFirstMsg = !loading && displayFirstMsg && !hasPersistedMessages
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-dark-400">
+    <div className="relative flex h-full min-h-0 flex-col bg-dark-400">
       <div className="glass border-b border-surface-border px-4 flex items-center gap-3 pt-[env(safe-area-inset-top)] h-[calc(56px+env(safe-area-inset-top))]">
         <button onClick={() => navigate('/chats')} className="btn-ghost p-2 -ml-2">
           <ChevronLeft size={22} />
@@ -187,7 +260,14 @@ export default function ChatPage() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-4 space-y-4">
+      <div
+        ref={messagesContainerRef}
+        onScroll={updateBottomState}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        className="min-h-0 flex-1 overflow-y-auto py-4 space-y-4"
+      >
         {showOpeningScene && (
           <div className="px-4 message-enter">
             <div className="mx-auto max-w-2xl rounded-2xl border border-surface-border bg-surface/50 px-4 py-3 text-center">
@@ -224,8 +304,19 @@ export default function ChatPage() {
           />
         ))}
 
-        <div ref={messagesEndRef} />
       </div>
+
+      {showJumpToBottom && (
+        <button
+          type="button"
+          onClick={jumpToBottom}
+          aria-label="回到底部"
+          title="回到底部"
+          className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+7rem)] left-1/2 z-20 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full border border-surface-border bg-surface/95 text-gray-300 shadow-lg shadow-black/30 backdrop-blur transition-all hover:border-primary-500/50 hover:text-primary-300 active:scale-95"
+        >
+          <ArrowDown size={18} />
+        </button>
+      )}
 
       <ChatInput onSend={handleSend} disabled={streaming} />
 
