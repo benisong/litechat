@@ -17,11 +17,15 @@ import (
 
 const (
 	summarySmallThreshold = 3000
-	summaryRawOverlap     = 4
+	summaryRawOverlap     = 12
 	summaryMergeCount     = 5
+	summarySmallMaxTokens = 2000
+	summaryBigMaxTokens   = 3200
 )
 
-const defaultMemoryPromptSuffix = `- 更重视剧情推进、关系变化和下次必须接住的未完成事项。
+const defaultMemoryPromptSuffix = `- 必须保留会影响后续回复的稳定事实：人物、地点、物品、组织、时间线、约定、偏好、禁忌、称呼、任务状态。
+- 对重要事件保留具体对象、原因、结果和当前状态，不要只写“关系变近”“继续推进”等空泛描述。
+- 更重视剧情推进、关系变化和下次必须接住的未完成事项。
 - 普通寒暄、重复情绪和无新信息的往返可以大幅压缩。
 - 用户事实只记录用户明确说过或行为上可以直接确认的内容，不要把角色猜测当事实。`
 
@@ -36,6 +40,7 @@ const summarySystemPrompt = `你是角色扮演聊天系统的会话记忆整理
 5. 五个字段都必须保留；如果某一类没有有效信息，请填写“无”。
 6. open_loops 必须优先保留未完成的约定、待解释事项、未回收伏笔、下次必须接住的剧情。
 7. 摘要应当高密度、去重复、便于后续连续扮演。
+8. 不要因为信息短就丢弃；只要会影响后续回复、角色状态或用户偏好，就必须保留。
 
 输出格式必须严格如下：
 <chat_summary>
@@ -386,7 +391,7 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	sourceFingerprint := summarySourceFingerprint(activeBig, precedingSmalls, rawMessages)
 
 	prompt := buildSmallSummaryPrompt(activeBig, precedingSmalls, rawMessages, settings.MemoryPromptSuffix)
-	rawSummary, err := s.callSummaryCompletion(settings, prompt, 1200)
+	rawSummary, err := s.callSummaryCompletion(settings, prompt, summarySmallMaxTokens)
 	if err != nil {
 		return err
 	}
@@ -462,7 +467,7 @@ func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
 	}
 	sourceFingerprint := summarySourceFingerprint(activeBig, targetSmalls, nil)
 	prompt := buildBigSummaryPrompt(activeBig, targetSmalls, settings.MemoryPromptSuffix)
-	rawSummary, err := s.callSummaryCompletion(settings, prompt, 1800)
+	rawSummary, err := s.callSummaryCompletion(settings, prompt, summaryBigMaxTokens)
 	if err != nil {
 		return err
 	}
@@ -631,11 +636,7 @@ func buildSmallSummaryPrompt(
 	builder.WriteString("额外要求：\n")
 	builder.WriteString("- 保持和已有摘要状态一致，不要改写已经确定的事实。\n")
 	builder.WriteString("- 重点压缩重复寒暄和无信息密度的往返，但不要遗漏关键转折。\n")
-	if strings.TrimSpace(suffix) != "" {
-		builder.WriteString("- 管理员补充要求：\n")
-		builder.WriteString(strings.TrimSpace(suffix))
-		builder.WriteString("\n")
-	}
+	appendMemoryPromptSuffix(&builder, suffix)
 
 	return builder.String()
 }
@@ -664,11 +665,8 @@ func buildBigSummaryPrompt(
 	builder.WriteString("\n额外要求：\n")
 	builder.WriteString("- 合并时要去重、压缩重复表述，但保留剧情推进和关系变化。\n")
 	builder.WriteString("- open_loops 只保留仍未解决、仍需要下次接住的事项。\n")
-	if strings.TrimSpace(suffix) != "" {
-		builder.WriteString("- 管理员补充要求：\n")
-		builder.WriteString(strings.TrimSpace(suffix))
-		builder.WriteString("\n")
-	}
+	builder.WriteString("- 合并时不得丢弃仍有效的旧事实、用户偏好、承诺、关系状态和世界状态。\n")
+	appendMemoryPromptSuffix(&builder, suffix)
 
 	return builder.String()
 }
@@ -695,16 +693,25 @@ func parseSummaryChunk(raw string) (string, error) {
 		return "", fmt.Errorf("摘要结果为空")
 	}
 
-	summary := parsedSummary{
-		Plot:         normalizeSummaryField(extractTaggedContent(cleaned, "plot")),
-		Relationship: normalizeSummaryField(extractTaggedContent(cleaned, "relationship")),
-		UserFacts:    normalizeSummaryField(extractTaggedContent(cleaned, "user_facts")),
-		WorldState:   normalizeSummaryField(extractTaggedContent(cleaned, "world_state")),
-		OpenLoops:    normalizeSummaryField(extractTaggedContent(cleaned, "open_loops")),
+	summary := parsedSummary{}
+	var missing []string
+	if summary.Plot = normalizeRequiredSummaryField(cleaned, "plot", &missing); summary.Plot == "" {
+		summary.Plot = "无"
 	}
-
-	if summary.Plot == "" || summary.Relationship == "" || summary.UserFacts == "" || summary.WorldState == "" || summary.OpenLoops == "" {
-		return "", fmt.Errorf("摘要字段不完整")
+	if summary.Relationship = normalizeRequiredSummaryField(cleaned, "relationship", &missing); summary.Relationship == "" {
+		summary.Relationship = "无"
+	}
+	if summary.UserFacts = normalizeRequiredSummaryField(cleaned, "user_facts", &missing); summary.UserFacts == "" {
+		summary.UserFacts = "无"
+	}
+	if summary.WorldState = normalizeRequiredSummaryField(cleaned, "world_state", &missing); summary.WorldState == "" {
+		summary.WorldState = "无"
+	}
+	if summary.OpenLoops = normalizeRequiredSummaryField(cleaned, "open_loops", &missing); summary.OpenLoops == "" {
+		summary.OpenLoops = "无"
+	}
+	if len(missing) > 0 {
+		return "", fmt.Errorf("摘要字段不完整: %s", strings.Join(missing, ", "))
 	}
 
 	return fmt.Sprintf(
@@ -746,6 +753,27 @@ func normalizeSummaryField(raw string) string {
 		return "无"
 	}
 	return raw
+}
+
+func normalizeRequiredSummaryField(raw, tag string, missing *[]string) string {
+	value := strings.TrimSpace(extractTaggedContent(raw, tag))
+	if value == "" {
+		*missing = append(*missing, tag)
+		return ""
+	}
+	return normalizeSummaryField(value)
+}
+
+func appendMemoryPromptSuffix(builder *strings.Builder, suffix string) {
+	if defaultSuffix := strings.TrimSpace(defaultMemoryPromptSuffix); defaultSuffix != "" {
+		builder.WriteString(defaultSuffix)
+		builder.WriteString("\n")
+	}
+	if adminSuffix := strings.TrimSpace(suffix); adminSuffix != "" {
+		builder.WriteString("- 管理员补充要求：\n")
+		builder.WriteString(adminSuffix)
+		builder.WriteString("\n")
+	}
 }
 
 func countEffectiveChars(messages []*model.Message) int {
