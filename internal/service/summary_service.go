@@ -21,6 +21,7 @@ const (
 	summaryMergeCount     = 5
 	summarySmallMaxTokens = 2000
 	summaryBigMaxTokens   = 3200
+	summaryMaxJobFailures = 3
 )
 
 const defaultMemoryPromptSuffix = `- 必须保留会影响后续回复的稳定事实：人物、地点、物品、组织、时间线、约定、偏好、禁忌、称呼、任务状态。
@@ -117,6 +118,9 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 	if coverageTo <= 0 {
 		return strings.Join(summaryBlocks, "\n\n"), history
 	}
+	if !summaryCoverageStartsAtBeginning(bigSummary, smallSummaries) {
+		return strings.Join(summaryBlocks, "\n\n"), history
+	}
 
 	rawStartSeq := coverageTo - summaryRawOverlap + 1
 	if rawStartSeq < 1 {
@@ -142,9 +146,6 @@ func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq in
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	if bigChunk != nil && bigChunk.FromSeq != 1 {
-		bigChunk = nil
-	}
 
 	smallChunks, err := s.summaryStore.ListUsableSmallChunks(chatID, maxToSeq)
 	if err != nil {
@@ -160,9 +161,6 @@ func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq in
 	for _, chunk := range smallChunks {
 		switch {
 		case coverageTo == 0:
-			if chunk.FromSeq != 1 {
-				continue
-			}
 			usableSmalls = append(usableSmalls, chunk)
 			coverageTo = chunk.ToSeq
 		case chunk.ToSeq <= coverageTo:
@@ -180,6 +178,13 @@ func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq in
 	}
 
 	return bigChunk, usableSmalls, coverageTo, nil
+}
+
+func summaryCoverageStartsAtBeginning(bigChunk *model.ChatSummaryChunk, smallChunks []*model.ChatSummaryChunk) bool {
+	if bigChunk != nil {
+		return bigChunk.FromSeq <= 1
+	}
+	return len(smallChunks) > 0 && smallChunks[0].FromSeq <= 1
 }
 
 func (s *SummaryService) OnAssistantMessageStored(chatID string) {
@@ -349,11 +354,69 @@ func (s *SummaryService) processNextJob() (bool, error) {
 	}
 
 	attempt := job.AttemptCount + 1
+	if attempt >= summaryMaxJobFailures {
+		if err := s.handleSummaryJobFailuresExhausted(job, runErr); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+
 	nextRunAt := time.Now().Add(nextRetryDelay(attempt))
 	if err := s.summaryStore.FailJob(job.ID, attempt, nextRunAt, runErr.Error()); err != nil {
 		return true, err
 	}
 	return true, nil
+}
+
+func (s *SummaryService) handleSummaryJobFailuresExhausted(job *model.ChatSummaryJob, runErr error) error {
+	userSeq, err := s.messageStore.LatestUserSeq(job.ChatID)
+	if err != nil {
+		return err
+	}
+	if userSeq <= 0 {
+		return s.summaryStore.MarkJobStale(job.ID, fmt.Sprintf("summary failed after %d attempts and no user node exists: %v", summaryMaxJobFailures, runErr))
+	}
+
+	reason := fmt.Sprintf("summary failed after %d attempts; resummarizing from user seq %d: %v", summaryMaxJobFailures, userSeq, runErr)
+	if err := s.summaryStore.MarkJobStale(job.ID, reason); err != nil {
+		return err
+	}
+	if err := s.rebuildSummaryFromSeq(job.ChatID, userSeq); err != nil {
+		return err
+	}
+	log.Printf("[summary] job=%s exhausted retries; rescheduled chat=%s from user seq=%d", job.ID, job.ChatID, userSeq)
+	s.wake()
+	return nil
+}
+
+func (s *SummaryService) rebuildSummaryFromSeq(chatID string, fromSeq int) error {
+	if fromSeq <= 0 {
+		return nil
+	}
+
+	latestSeq, err := s.messageStore.LatestSeq(chatID)
+	if err != nil {
+		return err
+	}
+	if latestSeq < fromSeq {
+		return nil
+	}
+
+	if err := s.summaryStore.MarkChunksDirtyFromSeq(chatID, fromSeq); err != nil {
+		return err
+	}
+	if err := s.summaryStore.ResetCurrentBigSummaryIfDirty(chatID); err != nil {
+		return err
+	}
+
+	baseCutoffSeq := fromSeq - 1
+	if baseCutoffSeq < 0 {
+		baseCutoffSeq = 0
+	}
+	if err := s.summaryStore.RollbackCutoff(chatID, baseCutoffSeq, fromSeq); err != nil {
+		return err
+	}
+	return s.summaryStore.ScheduleSmallJob(chatID, fromSeq, latestSeq, baseCutoffSeq)
 }
 
 func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {

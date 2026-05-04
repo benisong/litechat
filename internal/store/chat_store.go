@@ -241,6 +241,17 @@ func (s *MessageStore) LatestSeq(chatID string) (int, error) {
 	return int(seq.Int64), nil
 }
 
+func (s *MessageStore) LatestUserSeq(chatID string) (int, error) {
+	var seq sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MAX(seq) FROM messages WHERE chat_id = ? AND role = 'user'`, chatID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	if !seq.Valid {
+		return 0, nil
+	}
+	return int(seq.Int64), nil
+}
+
 // DeleteByID 删除单条消息
 func (s *MessageStore) DeleteByID(id string) error {
 	_, err := s.db.Exec(`DELETE FROM messages WHERE id = ?`, id)
