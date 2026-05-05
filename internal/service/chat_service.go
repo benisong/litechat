@@ -440,6 +440,69 @@ func (s *ChatService) getCharacterPOV(char *model.Character) string {
 	return "third"
 }
 
+type characterGenderHint struct {
+	Label           string
+	Pronoun         string
+	OppositePronoun string
+}
+
+func inferCharacterGenderHint(char *model.Character) characterGenderHint {
+	if char == nil {
+		return characterGenderHint{}
+	}
+
+	cardText := strings.ToLower(strings.Join([]string{
+		char.Description,
+		char.Personality,
+		char.Scenario,
+		char.FirstMsg,
+		char.Tags,
+	}, "\n"))
+	compact := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "", "　", "").Replace(cardText)
+
+	explicitFemale := containsAnyMarker(compact, []string{
+		"性别女", "性别:女", "性别：女", "性别=女", "性别-女",
+		"性别为女", "性别是女", "性别女性", "性别:女性", "性别：女性",
+	})
+	explicitMale := containsAnyMarker(compact, []string{
+		"性别男", "性别:男", "性别：男", "性别=男", "性别-男",
+		"性别为男", "性别是男", "性别男性", "性别:男性", "性别：男性",
+	})
+
+	if explicitFemale != explicitMale {
+		if explicitFemale {
+			return characterGenderHint{Label: "女性", Pronoun: "她", OppositePronoun: "他"}
+		}
+		return characterGenderHint{Label: "男性", Pronoun: "他", OppositePronoun: "她"}
+	}
+	if explicitFemale && explicitMale {
+		return characterGenderHint{}
+	}
+
+	female := containsAnyMarker(compact, []string{
+		"女性", "女生", "女孩", "少女", "女人", "女子", "女主", "女友",
+	})
+	male := containsAnyMarker(compact, []string{
+		"男性", "男生", "男孩", "少年", "男人", "男子", "男主", "男友",
+	})
+	if female == male {
+		return characterGenderHint{}
+	}
+	if female {
+		return characterGenderHint{Label: "女性", Pronoun: "她", OppositePronoun: "他"}
+	}
+	return characterGenderHint{Label: "男性", Pronoun: "他", OppositePronoun: "她"}
+}
+
+func containsAnyMarker(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID string) string {
 	if char == nil {
 		return ""
@@ -455,6 +518,8 @@ func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID stri
 		userName = "user"
 	}
 
+	genderHint := inferCharacterGenderHint(char)
+
 	var builder strings.Builder
 	builder.WriteString("[Identity Anchor]\n")
 	builder.WriteString(fmt.Sprintf("- You are %s. Always roleplay as this character.\n", charName))
@@ -462,9 +527,16 @@ func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID stri
 	builder.WriteString("- Never swap, merge, or confuse the identities of the character and the user.\n")
 	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to you, the character.\n", charName))
 	builder.WriteString(fmt.Sprintf("- Any role-card mention of %s refers to the user.\n", userName))
+	if genderHint.Label != "" {
+		builder.WriteString(fmt.Sprintf("- 角色卡性别锚点：%s 的性别/称谓倾向是%s；旁白里描述 %s 时必须使用“%s”和相符称谓，不要写成“%s”。\n", charName, genderHint.Label, charName, genderHint.Pronoun, genderHint.OppositePronoun))
+	} else {
+		builder.WriteString(fmt.Sprintf("- 必须服从 %s 角色卡里明确写出的性别、代词、身份称谓；不要根据姓名、语气或用户内容自行改性别。\n", charName))
+	}
 	if s.getCharacterPOV(char) == "second" {
 		builder.WriteString(fmt.Sprintf("- This role card may use second-person wording in the scenario or first message. If it uses \"you\" or \"你\", it refers to %s, the user, not to you.\n", userName))
-		builder.WriteString(fmt.Sprintf("- When writing normal narration, action description, inner thoughts, or dialogue addressed to the user, prefer \"你\" instead of repeatedly using %s as the subject.\n", userName))
+		builder.WriteString(fmt.Sprintf("- 二人称写作规则：描写用户的动作、感受、处境或对话称呼时用“你”，不要反复用 %s 当主语。\n", userName))
+		builder.WriteString(fmt.Sprintf("- 描写 %s 的动作、神态、心理或旁白时，用 %s 或与角色性别一致的第三人称代词；不要用“我”替代 %s。\n", charName, charName, charName))
+		builder.WriteString(fmt.Sprintf("- “我”只允许出现在 %s 的直接台词、清晰标注的内心独白或角色自述中，不能用于普通旁白。\n", charName))
 		builder.WriteString(fmt.Sprintf("- Only use %s as a literal name when the scene explicitly requires the name itself, such as letters, forms, signatures, quoted text, roll call, or deliberate emphasis.\n", userName))
 	} else {
 		builder.WriteString(fmt.Sprintf("- This role card uses third-person POV for the user. Mentions of %s still refer to the user, not to you.\n", userName))
