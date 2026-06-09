@@ -545,6 +545,56 @@ func (s *ChatService) buildRoleIdentityPrompt(char *model.Character, userID stri
 	return builder.String()
 }
 
+func (s *ChatService) buildPersistentRoleCardPrompt(char *model.Character, userID string) string {
+	if char == nil {
+		return ""
+	}
+
+	charName := strings.TrimSpace(char.Name)
+	if charName == "" {
+		charName = "character"
+	}
+
+	userName := strings.TrimSpace(s.getUserName(char, userID))
+	if userName == "" {
+		userName = "user"
+	}
+
+	renderRoleFacts := func(text string) string {
+		return strings.TrimSpace(replaceRoleRefs(text, charName, userName))
+	}
+
+	var builder strings.Builder
+	builder.WriteString("[Persistent Role Card]\n")
+	builder.WriteString("This role-card snapshot is authoritative and must remain active for the whole conversation. Long-term memory, summaries, and recent chat may add continuity, but they must not override these original character settings.\n")
+	builder.WriteString(fmt.Sprintf("Character Name: %s\n", charName))
+	builder.WriteString(fmt.Sprintf("User Name: %s\n", userName))
+
+	if userDetail := renderRoleFacts(s.getUserDetail(char, userID)); userDetail != "" {
+		builder.WriteString("User Detail:\n")
+		builder.WriteString(userDetail)
+		builder.WriteString("\n")
+	}
+	appendRoleCardSection(&builder, "Description", renderRoleFacts(char.Description))
+	appendRoleCardSection(&builder, "Personality", renderRoleFacts(char.Personality))
+	appendRoleCardSection(&builder, "Scenario", strings.TrimSpace(s.replaceRoleCardText(char.Scenario, char, userID)))
+	appendRoleCardSection(&builder, "Opening Message Reference", strings.TrimSpace(s.replaceRoleCardText(char.FirstMsg, char, userID)))
+	appendRoleCardSection(&builder, "Tags", renderRoleFacts(char.Tags))
+	return strings.TrimSpace(builder.String())
+}
+
+func appendRoleCardSection(builder *strings.Builder, title, content string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	builder.WriteString("\n")
+	builder.WriteString(title)
+	builder.WriteString(":\n")
+	builder.WriteString(content)
+	builder.WriteString("\n")
+}
+
 func replaceRoleRefs(text, charName, userRef string) string {
 	text = strings.ReplaceAll(text, "{{user}}", userRef)
 	text = strings.ReplaceAll(text, "{{User}}", userRef)
@@ -848,6 +898,13 @@ func (s *ChatService) buildMessages(chatID string, preset *model.Preset, char *m
 		}
 		systemContent.WriteString("[Summary Memory]\nUse this condensed long-term memory to preserve continuity. It supplements recent chat history and must not be ignored.\n")
 		systemContent.WriteString(summaryContext)
+	}
+	roleCardPrompt := s.buildPersistentRoleCardPrompt(char, userID)
+	if roleCardPrompt != "" {
+		if systemContent.Len() > 0 {
+			systemContent.WriteString("\n\n")
+		}
+		systemContent.WriteString(roleCardPrompt)
 	}
 
 	var result []model.ChatCompletionMessage

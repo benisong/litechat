@@ -81,7 +81,7 @@ G. 输出前请默默自问：”这段关系和身份，在选定的世界观�
 
 严格遵守以下规则：
 1. 你不是在聊天，也不是在扮演角色，你是在生成角色卡。
-2. 不要输出解释、前言、总结、Markdown、代码块。
+2. 不要输出解释、前言、总结、Markdown、代码块、JSON。
 3. 所有字段必须非空，内容具体、自然、可直接用于角色扮演聊天。
 4. description 必须写出角色身份、样貌细节、气质、成长/经历、当前处境，以及 {{char}} 与 {{user}} 关系的具体切入口（起源 + 当前状态）。
 5. personality 必须写出核心性格、反差、说话方式、行为习惯、情绪触发点、底线、偏爱方式或弱点，不能只写几个形容词。
@@ -93,7 +93,7 @@ G. 输出前请默默自问：”这段关系和身份，在选定的世界观�
 11. tags 输出 4 到 7 个简短中文标签，用逗号分隔。
 12. 不要输出 avatar_url、user_name、user_detail 等未要求字段。
 
-输出格式必须严格如下：
+输出格式必须严格如下，只能输出这一段 XML 标签：
 <character_card>
 <name>...</name>
 <description>...</description>
@@ -222,6 +222,65 @@ func buildCharacterCardPrompt(gender, setting, storyType, personality, pov templ
 	return builder.String()
 }
 
+type completionMessageContent string
+
+func (c *completionMessageContent) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("null")) {
+		*c = ""
+		return nil
+	}
+
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*c = completionMessageContent(text)
+		return nil
+	}
+
+	var parts []json.RawMessage
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return fmt.Errorf("不支持的 message.content 格式")
+	}
+
+	var builder strings.Builder
+	for _, part := range parts {
+		var partText string
+		if err := json.Unmarshal(part, &partText); err == nil {
+			appendCompletionPart(&builder, partText)
+			continue
+		}
+
+		var obj struct {
+			Text    string `json:"text"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(part, &obj); err == nil {
+			if obj.Text != "" {
+				appendCompletionPart(&builder, obj.Text)
+			} else if obj.Content != "" {
+				appendCompletionPart(&builder, obj.Content)
+			}
+		}
+	}
+	*c = completionMessageContent(strings.TrimSpace(builder.String()))
+	return nil
+}
+
+func (c completionMessageContent) String() string {
+	return string(c)
+}
+
+func appendCompletionPart(builder *strings.Builder, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if builder.Len() > 0 {
+		builder.WriteString("\n")
+	}
+	builder.WriteString(text)
+}
+
 func (s *ChatService) callOpenAICompletion(settings *model.AppSettings, modelName string, messages []model.ChatCompletionMessage, temperature float64, maxTokens int, topP float64) (string, error) {
 	reqBody := model.ChatCompletionRequest{
 		Model:       modelName,
@@ -261,7 +320,7 @@ func (s *ChatService) callOpenAICompletion(settings *model.AppSettings, modelNam
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content completionMessageContent `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -273,7 +332,7 @@ func (s *ChatService) callOpenAICompletion(settings *model.AppSettings, modelNam
 		return "", fmt.Errorf("模型未返回内容")
 	}
 
-	content := strings.TrimSpace(result.Choices[0].Message.Content)
+	content := strings.TrimSpace(result.Choices[0].Message.Content.String())
 	if content == "" {
 		return "", fmt.Errorf("模型未返回内容")
 	}
@@ -287,6 +346,21 @@ func parseCharacterCardDraft(raw string) (*model.CharacterDraft, error) {
 		return nil, fmt.Errorf("模型未返回可解析的角色卡内容")
 	}
 
+	if draft, ok := parseCharacterCardDraftJSON(cleaned); ok {
+		if err := validateCharacterCardDraft(draft); err != nil {
+			return nil, err
+		}
+		return draft, nil
+	}
+
+	draft := parseCharacterCardDraftTags(cleaned)
+	if err := validateCharacterCardDraft(draft); err != nil {
+		return nil, err
+	}
+	return draft, nil
+}
+
+func parseCharacterCardDraftTags(cleaned string) *model.CharacterDraft {
 	draft := &model.CharacterDraft{
 		Name:        extractTaggedContent(cleaned, "name"),
 		Description: extractTaggedContent(cleaned, "description"),
@@ -299,6 +373,144 @@ func parseCharacterCardDraft(raw string) (*model.CharacterDraft, error) {
 		UserDetail:  "",
 	}
 
+	return draft
+}
+
+type characterCardDraftJSON struct {
+	Name               string                  `json:"name"`
+	Description        string                  `json:"description"`
+	Personality        string                  `json:"personality"`
+	Scenario           string                  `json:"scenario"`
+	FirstMsg           string                  `json:"first_msg"`
+	FirstMsgCamel      string                  `json:"firstMsg"`
+	FirstMessage       string                  `json:"first_message"`
+	Tags               draftTags               `json:"tags"`
+	CharacterCard      *characterCardDraftJSON `json:"character_card"`
+	CharacterCardCamel *characterCardDraftJSON `json:"characterCard"`
+	Draft              *characterCardDraftJSON `json:"draft"`
+}
+
+type draftTags []string
+
+func (t *draftTags) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*t = draftTags{text}
+		return nil
+	}
+
+	var parts []string
+	if err := json.Unmarshal(data, &parts); err == nil {
+		*t = draftTags(parts)
+		return nil
+	}
+
+	var values []any
+	if err := json.Unmarshal(data, &values); err == nil {
+		parts = parts[:0]
+		for _, value := range values {
+			parts = append(parts, fmt.Sprint(value))
+		}
+		*t = draftTags(parts)
+	}
+	return nil
+}
+
+func (t draftTags) String() string {
+	return strings.Join(t, ",")
+}
+
+func parseCharacterCardDraftJSON(cleaned string) (*model.CharacterDraft, bool) {
+	jsonText := extractJSONObject(cleaned)
+	if jsonText == "" {
+		return nil, false
+	}
+
+	var parsed characterCardDraftJSON
+	if err := json.Unmarshal([]byte(jsonText), &parsed); err != nil {
+		return nil, false
+	}
+
+	parsed = parsed.unwrap()
+	firstMsg := strings.TrimSpace(parsed.FirstMsg)
+	if firstMsg == "" {
+		firstMsg = strings.TrimSpace(parsed.FirstMsgCamel)
+	}
+	if firstMsg == "" {
+		firstMsg = strings.TrimSpace(parsed.FirstMessage)
+	}
+
+	return &model.CharacterDraft{
+		Name:        strings.TrimSpace(parsed.Name),
+		Description: strings.TrimSpace(parsed.Description),
+		Personality: strings.TrimSpace(parsed.Personality),
+		Scenario:    strings.TrimSpace(parsed.Scenario),
+		FirstMsg:    firstMsg,
+		Tags:        normalizeDraftTags(parsed.Tags.String()),
+		AvatarURL:   "",
+		UserName:    "",
+		UserDetail:  "",
+	}, true
+}
+
+func (d characterCardDraftJSON) unwrap() characterCardDraftJSON {
+	switch {
+	case d.CharacterCard != nil:
+		return *d.CharacterCard
+	case d.CharacterCardCamel != nil:
+		return *d.CharacterCardCamel
+	case d.Draft != nil:
+		return *d.Draft
+	default:
+		return d
+	}
+}
+
+func extractJSONObject(raw string) string {
+	start := strings.Index(raw, "{")
+	if start < 0 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			continue
+		}
+		if ch == '{' {
+			depth++
+			continue
+		}
+		if ch == '}' {
+			depth--
+			if depth == 0 {
+				return raw[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func validateCharacterCardDraft(draft *model.CharacterDraft) error {
 	var missing []string
 	if draft.Name == "" {
 		missing = append(missing, "name")
@@ -319,10 +531,10 @@ func parseCharacterCardDraft(raw string) (*model.CharacterDraft, error) {
 		missing = append(missing, "tags")
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("角色卡字段解析不完整: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("角色卡字段解析不完整: %s", strings.Join(missing, ", "))
 	}
 
-	return draft, nil
+	return nil
 }
 
 func extractTaggedContent(raw, tag string) string {
@@ -357,8 +569,33 @@ func normalizeDraftTags(raw string) string {
 
 func stripMarkdownCodeFence(raw string) string {
 	trimmed := strings.TrimSpace(raw)
-	trimmed = strings.TrimPrefix(trimmed, "```xml")
-	trimmed = strings.TrimPrefix(trimmed, "```")
-	trimmed = strings.TrimSuffix(trimmed, "```")
-	return strings.TrimSpace(trimmed)
+	start := strings.Index(trimmed, "```")
+	if start < 0 {
+		return trimmed
+	}
+	end := strings.LastIndex(trimmed, "```")
+	if end <= start {
+		return trimmed
+	}
+
+	inner := strings.TrimSpace(trimmed[start+3 : end])
+	if newline := strings.IndexByte(inner, '\n'); newline >= 0 {
+		firstLine := strings.TrimSpace(inner[:newline])
+		if isCodeFenceLanguage(firstLine) {
+			inner = inner[newline+1:]
+		}
+	}
+	return strings.TrimSpace(inner)
+}
+
+func isCodeFenceLanguage(line string) bool {
+	if line == "" {
+		return true
+	}
+	switch strings.ToLower(line) {
+	case "json", "xml", "html", "text", "plaintext":
+		return true
+	default:
+		return false
+	}
 }

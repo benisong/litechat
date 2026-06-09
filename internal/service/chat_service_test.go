@@ -51,3 +51,39 @@ func TestInferCharacterGenderHintPrioritizesExplicitGender(t *testing.T) {
 		t.Fatalf("expected explicit female gender to win, got %+v", hint)
 	}
 }
+
+func TestBuildPersistentRoleCardPromptIncludesInitialSettings(t *testing.T) {
+	svc := &ChatService{}
+	char := &model.Character{
+		Name:          "林小雨",
+		Description:   "{{char}} 是旧书店店主，习惯在雨夜收留迷路的人。",
+		Personality:   "{{char}} 温柔克制，但遇到 {{user}} 的安全问题会变得强势。",
+		Scenario:      "{{char}} 在雨夜的书店门口遇见 {{user}}，两人的旧约重新被提起。",
+		FirstMsg:      "{{char}} 把伞递到 {{user}} 手里，低声说：别再淋雨了。",
+		Tags:          "都市,治愈,旧约",
+		POV:           "second",
+		UseCustomUser: true,
+		UserName:      "阿明",
+		UserDetail:    "{{user}} 是常来书店的老顾客。",
+	}
+
+	prompt := svc.buildPersistentRoleCardPrompt(char, "user-1")
+
+	wantParts := []string{
+		"[Persistent Role Card]",
+		"must remain active for the whole conversation",
+		"Character Name: 林小雨",
+		"User Name: 阿明",
+		"User Detail:\n阿明 是常来书店的老顾客。",
+		"Description:\n林小雨 是旧书店店主",
+		"Personality:\n林小雨 温柔克制",
+		"Scenario:\n林小雨 在雨夜的书店门口遇见 你",
+		"Opening Message Reference:\n林小雨 把伞递到 你 手里",
+		"Tags:\n都市,治愈,旧约",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Fatalf("persistent role card prompt missing %q\nprompt:\n%s", part, prompt)
+		}
+	}
+}
