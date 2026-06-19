@@ -26,56 +26,77 @@ const HIDDEN_TAGS = [
   /<语言风格>[\s\S]*?<\/语言风格>/gi,
 ]
 
-// 解析思考块：<CoT><details><summary>...</summary>...</details></CoT> 或 <think>...</think>
+// 解析思考块：<CoT><details><summary>...</summary>...</details></CoT>、裸 <CoT>...</CoT> 或 <think>...</think>
 function parseThinkingBlocks(text) {
   const parts = []
-  let remaining = text
 
-  // 匹配 <CoT>...<details><summary>...</summary>...</details>...</CoT>
-  const cotRegex = /<CoT>\s*<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>\s*<\/CoT>/gi
-  // 匹配 <think>...</think>
+  const cotDetailsRegex = /<CoT>\s*<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>\s*<\/CoT>/gi
+  const cotPlainRegex = /<CoT>([\s\S]*?)<\/CoT>/gi
   const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
 
-  // 合并两种格式
   const allBlocks = []
 
   let match
-  while ((match = cotRegex.exec(text)) !== null) {
+  while ((match = cotDetailsRegex.exec(text)) !== null) {
     allBlocks.push({
       index: match.index,
       length: match[0].length,
-      title: match[1].trim(),
+      title: match[1].trim() || '思考过程',
       content: match[2].trim(),
-      full: match[0],
+      priority: 2,
     })
   }
+
+  while ((match = cotPlainRegex.exec(text)) !== null) {
+    const full = match[0]
+    const inner = match[1]
+    if (/<details>[\s\S]*<\/details>/i.test(full)) continue
+    allBlocks.push({
+      index: match.index,
+      length: full.length,
+      title: '思考过程',
+      content: inner.trim(),
+      priority: 1,
+    })
+  }
+
   while ((match = thinkRegex.exec(text)) !== null) {
     allBlocks.push({
       index: match.index,
       length: match[0].length,
       title: '思考过程',
       content: match[1].trim(),
-      full: match[0],
+      priority: 0,
     })
   }
 
-  // 按位置排序
-  allBlocks.sort((a, b) => a.index - b.index)
+  allBlocks.sort((a, b) => {
+    if (a.index !== b.index) return a.index - b.index
+    return b.priority - a.priority
+  })
 
-  if (allBlocks.length === 0) {
+  const filteredBlocks = []
+  let lastEnd = -1
+  for (const block of allBlocks) {
+    if (block.index < lastEnd) continue
+    filteredBlocks.push(block)
+    lastEnd = block.index + block.length
+  }
+
+  if (filteredBlocks.length === 0) {
     return [{ type: 'text', content: text }]
   }
 
   let cursor = 0
-  for (const block of allBlocks) {
+  for (const block of filteredBlocks) {
     if (block.index > cursor) {
-      parts.push({ type: 'text', content: remaining.substring(cursor, block.index) })
+      parts.push({ type: 'text', content: text.substring(cursor, block.index) })
     }
     parts.push({ type: 'thinking', title: block.title, content: block.content })
     cursor = block.index + block.length
   }
-  if (cursor < remaining.length) {
-    parts.push({ type: 'text', content: remaining.substring(cursor) })
+  if (cursor < text.length) {
+    parts.push({ type: 'text', content: text.substring(cursor) })
   }
 
   return parts
