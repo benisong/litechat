@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft, Save, Upload } from 'lucide-react'
+import { Check, ChevronLeft, Save, Upload } from 'lucide-react'
 import { useAuthStore, useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import {
@@ -86,6 +86,10 @@ export default function CharacterEditPage() {
   const renderedPersonality = renderRolePlaceholders(form.personality, { character: form, user })
   const renderedScenario = renderRolePlaceholders(form.scenario, { character: form, user })
   const renderedFirstMsg = renderRolePlaceholders(form.first_msg, { character: form, user })
+  const profileSourceLabel = form.use_custom_user ? '角色内用户设定' : '账户资料'
+  const userStatusSummary = form.pov === 'second'
+    ? '第二人称下 {{user}} 固定显示为“你”，用户名称仅用于后台设定。'
+    : `当前 {{user}} 将显示为“${displayUserName}”`
 
   useEffect(() => {
     if (!isNew) {
@@ -215,10 +219,29 @@ export default function CharacterEditPage() {
             </button>
           </div>
 
+          <div className="rounded-xl border border-surface-border bg-surface/40 p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                <Check size={12} />
+                允许并存
+              </span>
+              <span className="inline-flex rounded-full border border-surface-border bg-surface px-2.5 py-1 text-[11px] text-gray-300">
+                当前来源：{profileSourceLabel}
+              </span>
+            </div>
+            <p className="text-xs leading-5 text-gray-400">
+              账户资料和角色内用户设定现在允许并存。这里只是决定这个角色在对话里优先采用哪一套用户信息，不会删除另一套资料。
+            </p>
+            <div className="rounded-xl border border-primary-500/20 bg-primary-500/5 px-3 py-2">
+              <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary-300">状态栏</p>
+              <p className="mt-1 text-xs text-gray-300">{userStatusSummary}</p>
+            </div>
+          </div>
+
           {!form.use_custom_user ? (
-            <p className="text-xs text-gray-500">未启用自定义用户信息时，将使用当前账户的用户资料。</p>
+            <p className="mt-2 text-xs text-gray-500">未启用角色内用户设定时，将优先使用当前账户资料；角色内填写内容也会保留。</p>
           ) : (
-            <div className="space-y-3 mt-2">
+            <div className="space-y-3 mt-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户名称</label>
                 <input
