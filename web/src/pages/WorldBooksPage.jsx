@@ -13,8 +13,8 @@ const ROLE_OPTIONS = [
 ]
 
 const STATUS_BAR_ENTRY_KEY = '状态栏'
-const DEFAULT_STATUS_BAR_TEMPLATE = `【输出要求】每次回复的最后，都必须另起一段，按下面的格式输出当前状态栏。请根据当前剧情如实填写每一项的内容，不要保留方括号占位文字，不要省略此状态栏：
-'''
+// 仅样式部分（包裹方式由用户决定）。对 AI 的输出约束已固化在后端，不在此处、用户不可改。
+const DEFAULT_STATUS_BAR_TEMPLATE = `'''
 【状态栏】
 时间：{{time}}
 地点：[当前所在地点]
@@ -22,8 +22,7 @@ const DEFAULT_STATUS_BAR_TEMPLATE = `【输出要求】每次回复的最后，�
 对方状态：[角色当前的身体/心情/处境]
 关系：[双方当前关系]
 当前事件：[此刻正在发生的事]
-'''
-`
+'''`
 
 const DEFAULT_ENTRY = {
   keys: '', secondary_keys: '', content: '', enabled: true, constant: false,
@@ -57,20 +56,8 @@ export default function WorldBooksPage() {
   const handleCreateBook = async () => {
     if (!newBookForm.name.trim()) { showToast('请填写世界书名称', 'error'); return }
     try {
+      // 状态栏特殊条目由后端在绑定角色卡时自动创建，前端不再重复创建
       const wb = await createWorldBook(newBookForm)
-      if (newBookForm.character_id) {
-        await createEntry(wb.id, {
-          ...DEFAULT_ENTRY,
-          keys: STATUS_BAR_ENTRY_KEY,
-          content: DEFAULT_STATUS_BAR_TEMPLATE,
-          constant: true,
-          enabled: true,
-          injection_position: 1,
-          injection_depth: 0,
-          order: 0,
-          role: 'system',
-        })
-      }
       setShowNewBook(false)
       setNewBookForm({ name: '', description: '', character_id: '' })
       showToast('世界书创建成功', 'success')
@@ -261,14 +248,17 @@ export default function WorldBooksPage() {
             {editEntry?.keys === STATUS_BAR_ENTRY_KEY ? (
               <>
                 <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs text-gray-300 leading-relaxed">
-                  这是绑定角色卡时自动创建的特殊条目。这里仅允许修改状态栏模板内容；开关请在列表页直接控制。
+                  这是绑定角色卡时自动创建的特殊条目。这里只定义状态栏的<b>显示样式</b>（包括字段和包裹方式，可自行更换 【】、边框、标签等）。
+                  对 AI「每次回复结尾必须输出状态栏」的约束已由系统固定，不在此处、也无法修改。
+                  开关请在列表页直接控制。<br />
+                  注：若你用三个单引号 <code>'''</code> 包裹样式，系统会自动忽略这层包裹，只取其中内容。
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1.5">状态栏内容 *</label>
+                  <label className="block text-xs text-gray-400 mb-1.5">状态栏样式 *</label>
                   <textarea className="w-full input-base resize-none text-sm" rows={12}
                     value={entryForm.content}
                     onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
-                    placeholder="请填写状态栏模板内容" />
+                    placeholder="在此定义状态栏的字段与包裹样式" />
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}

@@ -29,7 +29,7 @@ type Handlers struct {
 
 const (
 	statusBarEntryKey             = "状态栏"
-	defaultStatusBarTemplate      = "【输出要求】每次回复的最后，都必须另起一段，按下面的格式输出当前状态栏。请根据当前剧情如实填写每一项的内容，不要保留方括号占位文字，不要省略此状态栏：\n'''\n【状态栏】\n时间：{{time}}\n地点：[当前所在地点]\n我方状态：[用户角色当前的身体/心情/处境]\n对方状态：[角色当前的身体/心情/处境]\n关系：[双方当前关系]\n当前事件：[此刻正在发生的事]\n'''\n"
+	defaultStatusBarTemplate      = "'''\n【状态栏】\n时间：{{time}}\n地点：[当前所在地点]\n我方状态：[用户角色当前的身体/心情/处境]\n对方状态：[角色当前的身体/心情/处境]\n关系：[双方当前关系]\n当前事件：[此刻正在发生的事]\n'''"
 	statusBarInjectionPosition    = 1
 	statusBarInjectionDepth       = 0
 	statusBarOrder                = 0
