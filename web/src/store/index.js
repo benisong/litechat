@@ -244,6 +244,8 @@ export const useChatStore = create((set, get) => ({
     }
     set(s => ({ messages: [...s.messages, userMsg], streaming: true, streamContent: '' }))
 
+    const requestStartedAt = Date.now()
+
     // 先添加一个空的 AI 消息占位
     const aiMsgPlaceholder = {
       id: 'temp-ai-' + Date.now(),
@@ -315,7 +317,18 @@ export const useChatStore = create((set, get) => ({
 
       // 流式结束，刷新消息列表
       const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
-      set({ messages: freshMessages || [], streaming: false, streamContent: '' })
+      const responseTimeSeconds = Math.max(0, (Date.now() - requestStartedAt) / 1000)
+      const lastAssistantIndex = Array.isArray(freshMessages)
+        ? [...freshMessages].map(m => m.role).lastIndexOf('assistant')
+        : -1
+      const hydratedMessages = Array.isArray(freshMessages)
+        ? freshMessages.map((message, index) => (
+            index === lastAssistantIndex
+              ? { ...message, response_time_seconds: responseTimeSeconds }
+              : message
+          ))
+        : []
+      set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
       set(s => ({
         messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id),
@@ -346,6 +359,8 @@ export const useChatStore = create((set, get) => ({
   // 重新生成：后端删除最后一条 AI 回复并重新请求（不重复发送用户消息）
   regenerate: async (chatId) => {
     set(s => ({ streaming: true, streamContent: '' }))
+
+    const requestStartedAt = Date.now()
 
     // 先添加一个空的 AI 消息占位
     const aiPlaceholder = {
@@ -406,9 +421,19 @@ export const useChatStore = create((set, get) => ({
         }
       }
 
-      // 刷新消息列表
       const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
-      set({ messages: freshMessages || [], streaming: false, streamContent: '' })
+      const responseTimeSeconds = Math.max(0, (Date.now() - requestStartedAt) / 1000)
+      const lastAssistantIndex = Array.isArray(freshMessages)
+        ? [...freshMessages].map(m => m.role).lastIndexOf('assistant')
+        : -1
+      const hydratedMessages = Array.isArray(freshMessages)
+        ? freshMessages.map((message, index) => (
+            index === lastAssistantIndex
+              ? { ...message, response_time_seconds: responseTimeSeconds }
+              : message
+          ))
+        : []
+      set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
       set(s => ({
         messages: s.messages.filter(m => m.id !== aiPlaceholder.id),

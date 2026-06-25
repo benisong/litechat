@@ -5,6 +5,11 @@ import MessageContent from './MessageContent'
 import Modal from '../ui/Modal'
 import { Trash2, Copy, Check, RefreshCw } from 'lucide-react'
 
+function formatDurationSeconds(seconds) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
+  return `${seconds.toFixed(1)}s`
+}
+
 export default function MessageBubble({ message, character, onRegenerate, onRetry, onDeleteCascade }) {
   const [copied, setCopied] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -12,6 +17,7 @@ export default function MessageBubble({ message, character, onRegenerate, onRetr
   const isUser = message.role === 'user'
   const isStreaming = message.isStreaming
   const isTemp = message.id?.startsWith('temp')
+  const durationLabel = !isUser ? formatDurationSeconds(message.response_time_seconds) : null
 
   const handleCopy = async (e) => {
     e.stopPropagation()
@@ -70,6 +76,12 @@ export default function MessageBubble({ message, character, onRegenerate, onRetr
               'flex items-center gap-1.5 px-0.5',
               isUser ? 'flex-row-reverse' : 'flex-row'
             )}>
+              {durationLabel && (
+                <span className="text-[10px] text-gray-500 px-0.5 select-none" title="AI 响应耗时">
+                  {durationLabel}
+                </span>
+              )}
+
               <button onClick={handleCopy}
                 className="p-1 rounded-md text-gray-500 hover:text-gray-300 transition-colors">
                 {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
