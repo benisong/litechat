@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRight,
-         ChevronDown, ChevronUp, Pin, Search as SearchIcon, Globe, User } from 'lucide-react'
+         ChevronDown, ChevronUp, Pin, Globe, User } from 'lucide-react'
 import { useWorldBookStore, useCharacterStore, useUIStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
@@ -11,6 +11,18 @@ const ROLE_OPTIONS = [
   { value: 'user', label: '用户', color: 'text-green-400 bg-green-500/10 border-green-500/30' },
   { value: 'assistant', label: '助手', color: 'text-purple-400 bg-purple-500/10 border-purple-500/30' },
 ]
+
+const STATUS_BAR_ENTRY_KEY = '状态栏'
+const DEFAULT_STATUS_BAR_TEMPLATE = `'''
+【状态栏】
+时间：{{time}}
+地点：{{location}}
+我方状态：{{user_state}}
+对方状态：{{char_state}}
+关系：{{relationship}}
+当前事件：{{current_event}}
+'''
+`
 
 const DEFAULT_ENTRY = {
   keys: '', secondary_keys: '', content: '', enabled: true, constant: false,
@@ -45,15 +57,19 @@ export default function WorldBooksPage() {
     if (!newBookForm.name.trim()) { showToast('请填写世界书名称', 'error'); return }
     try {
       const wb = await createWorldBook(newBookForm)
-      // 自动创建默认条目「默认规则」
-      await createEntry(wb.id, {
-        ...DEFAULT_ENTRY,
-        keys: '默认规则',
-        content: '在此填写世界书的默认规则内容',
-        constant: true,
-        enabled: true,
-        injection_depth: 0,
-      })
+      if (newBookForm.character_id) {
+        await createEntry(wb.id, {
+          ...DEFAULT_ENTRY,
+          keys: STATUS_BAR_ENTRY_KEY,
+          content: DEFAULT_STATUS_BAR_TEMPLATE,
+          constant: true,
+          enabled: true,
+          injection_position: 1,
+          injection_depth: 0,
+          order: 0,
+          role: 'system',
+        })
+      }
       setShowNewBook(false)
       setNewBookForm({ name: '', description: '', character_id: '' })
       showToast('世界书创建成功', 'success')
@@ -72,6 +88,12 @@ export default function WorldBooksPage() {
   }
 
   const openEntryEditor = (entry = null) => {
+    if (entry?.keys === STATUS_BAR_ENTRY_KEY) {
+      setEntryForm({ ...DEFAULT_ENTRY, ...entry })
+      setEditEntry(entry)
+      setShowEntryEditor(true)
+      return
+    }
     if (entry) {
       setEntryForm({ ...DEFAULT_ENTRY, ...entry })
       setEditEntry(entry)
@@ -106,6 +128,7 @@ export default function WorldBooksPage() {
   // 世界书条目详情视图
   if (view === 'book' && currentBook) {
     const entries = currentBook.entries || []
+    const isStatusBarEntry = (entry) => entry?.keys === STATUS_BAR_ENTRY_KEY
     return (
       <div className="flex flex-col h-full">
         <div className="px-4 pt-12 pb-4 flex items-center gap-3">
@@ -151,7 +174,9 @@ export default function WorldBooksPage() {
 
                 {/* 关键词 */}
                 <div className="flex-1 min-w-0">
-                  {entry.keys ? (
+                  {isStatusBarEntry(entry) ? (
+                    <span className="text-xs text-cyan-300">特殊条目：状态栏</span>
+                  ) : entry.keys ? (
                     <div className="flex gap-1 flex-wrap">
                       {entry.keys.split(',').slice(0, 3).map(k => k.trim()).filter(Boolean).map(k => (
                         <span key={k} className="text-[11px] bg-primary-500/15 text-primary-300
@@ -210,15 +235,17 @@ export default function WorldBooksPage() {
                       className="flex-1 py-2 text-xs text-center rounded-lg bg-primary-600/20 text-primary-300
                                  hover:bg-primary-600/30 transition-colors"
                     >
-                      编辑
+                      {isStatusBarEntry(entry) ? '编辑内容' : '编辑'}
                     </button>
-                    <button
-                      onClick={() => deleteEntry(entry.id)}
-                      className="py-2 px-4 text-xs rounded-lg bg-red-500/10 text-red-400
-                                 hover:bg-red-500/20 transition-colors"
-                    >
-                      删除
-                    </button>
+                    {!isStatusBarEntry(entry) && (
+                      <button
+                        onClick={() => deleteEntry(entry.id)}
+                        className="py-2 px-4 text-xs rounded-lg bg-red-500/10 text-red-400
+                                   hover:bg-red-500/20 transition-colors"
+                      >
+                        删除
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -228,118 +255,140 @@ export default function WorldBooksPage() {
 
         {/* 条目编辑弹窗 */}
         <Modal open={showEntryEditor} onClose={() => { setShowEntryEditor(false); setEditEntry(null) }}
-          title={editEntry ? '编辑条目' : '新建条目'}>
+          title={editEntry ? (editEntry.keys === STATUS_BAR_ENTRY_KEY ? '编辑状态栏内容' : '编辑条目') : '新建条目'}>
           <div className="space-y-4">
-            {/* 关键词 */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">主关键词（逗号分隔，OR 逻辑）</label>
-              <input className="w-full input-base text-sm" value={entryForm.keys}
-                onChange={e => setEntryForm(f => ({ ...f, keys: e.target.value }))}
-                placeholder="例如：魔法,法师,魔法学院" />
-            </div>
+            {editEntry?.keys === STATUS_BAR_ENTRY_KEY ? (
+              <>
+                <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs text-gray-300 leading-relaxed">
+                  这是绑定角色卡时自动创建的特殊条目。这里仅允许修改状态栏模板内容；开关请在列表页直接控制。
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">状态栏内容 *</label>
+                  <textarea className="w-full input-base resize-none text-sm" rows={12}
+                    value={entryForm.content}
+                    onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
+                    placeholder="请填写状态栏模板内容" />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}
+                    className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
+                               hover:bg-surface-hover transition-colors">取消</button>
+                  <button onClick={handleSaveEntry} className="flex-1 btn-primary py-3">保存</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">主关键词（逗号分隔，OR 逻辑）</label>
+                  <input className="w-full input-base text-sm" value={entryForm.keys}
+                    onChange={e => setEntryForm(f => ({ ...f, keys: e.target.value }))}
+                    placeholder="例如：魔法,法师,魔法学院" />
+                </div>
 
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">次关键词（逗号分隔，AND 逻辑，需同时命中）</label>
-              <input className="w-full input-base text-sm" value={entryForm.secondary_keys}
-                onChange={e => setEntryForm(f => ({ ...f, secondary_keys: e.target.value }))}
-                placeholder="留空则只看主关键词" />
-            </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">次关键词（逗号分隔，AND 逻辑，需同时命中）</label>
+                  <input className="w-full input-base text-sm" value={entryForm.secondary_keys}
+                    onChange={e => setEntryForm(f => ({ ...f, secondary_keys: e.target.value }))}
+                    placeholder="留空则只看主关键词" />
+                </div>
 
-            {/* 内容 */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">注入内容 *</label>
-              <textarea className="w-full input-base resize-none text-sm" rows={5}
-                value={entryForm.content}
-                onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
-                placeholder="当关键词命中时，此内容将被注入到上下文中" />
-            </div>
+                {/* 内容 */}
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">注入内容 *</label>
+                  <textarea className="w-full input-base resize-none text-sm" rows={5}
+                    value={entryForm.content}
+                    onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
+                    placeholder="当关键词命中时，此内容将被注入到上下文中" />
+                </div>
 
-            {/* 注入配置 - 第一行 */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">角色</label>
-                <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
-                  value={entryForm.role}
-                  onChange={e => setEntryForm(f => ({ ...f, role: e.target.value }))}>
-                  {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">注入方式</label>
-                <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
-                  value={entryForm.injection_position}
-                  onChange={e => setEntryForm(f => ({ ...f, injection_position: parseInt(e.target.value) }))}>
-                  <option value={0}>相对末尾</option>
-                  <option value={1}>绝对位置</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">注入深度</label>
-                <input type="number" className="w-full input-base text-xs py-2" min="0"
-                  value={entryForm.injection_depth}
-                  onChange={e => setEntryForm(f => ({ ...f, injection_depth: parseInt(e.target.value) || 0 }))} />
-              </div>
-            </div>
+                {/* 注入配置 - 第一行 */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">角色</label>
+                    <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
+                      value={entryForm.role}
+                      onChange={e => setEntryForm(f => ({ ...f, role: e.target.value }))}>
+                      {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">注入方式</label>
+                    <select className="w-full input-base text-xs py-2 bg-surface appearance-none"
+                      value={entryForm.injection_position}
+                      onChange={e => setEntryForm(f => ({ ...f, injection_position: parseInt(e.target.value) }))}>
+                      <option value={0}>相对末尾</option>
+                      <option value={1}>绝对位置</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">注入深度</label>
+                    <input type="number" className="w-full input-base text-xs py-2" min="0"
+                      value={entryForm.injection_depth}
+                      onChange={e => setEntryForm(f => ({ ...f, injection_depth: parseInt(e.target.value) || 0 }))} />
+                  </div>
+                </div>
 
-            {/* 注入配置 - 第二行 */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">扫描深度</label>
-                <input type="number" className="w-full input-base text-xs py-2" min="0"
-                  value={entryForm.scan_depth}
-                  onChange={e => setEntryForm(f => ({ ...f, scan_depth: parseInt(e.target.value) || 0 }))} />
-                <p className="text-[9px] text-gray-600 mt-0.5">0=全部消息</p>
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">优先级</label>
-                <input type="number" className="w-full input-base text-xs py-2"
-                  value={entryForm.priority}
-                  onChange={e => setEntryForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} />
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-500 mb-1">排序</label>
-                <input type="number" className="w-full input-base text-xs py-2"
-                  value={entryForm.order}
-                  onChange={e => setEntryForm(f => ({ ...f, order: parseInt(e.target.value) || 0 }))} />
-              </div>
-            </div>
+                {/* 注入配置 - 第二行 */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">扫描深度</label>
+                    <input type="number" className="w-full input-base text-xs py-2" min="0"
+                      value={entryForm.scan_depth}
+                      onChange={e => setEntryForm(f => ({ ...f, scan_depth: parseInt(e.target.value) || 0 }))} />
+                    <p className="text-[9px] text-gray-600 mt-0.5">0=全部消息</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">优先级</label>
+                    <input type="number" className="w-full input-base text-xs py-2"
+                      value={entryForm.priority}
+                      onChange={e => setEntryForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">排序</label>
+                    <input type="number" className="w-full input-base text-xs py-2"
+                      value={entryForm.order}
+                      onChange={e => setEntryForm(f => ({ ...f, order: parseInt(e.target.value) || 0 }))} />
+                  </div>
+                </div>
 
-            {/* 开关选项 */}
-            <div className="flex gap-2 flex-wrap">
-              {[
-                { key: 'enabled', label: '启用' },
-                { key: 'constant', label: '常驻（无需关键词）' },
-                { key: 'case_sensitive', label: '大小写敏感' },
-              ].map(({ key, label }) => (
-                <label key={key} className={clsx(
-                  'flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border text-xs transition-colors',
-                  entryForm[key]
-                    ? 'border-primary-500/40 bg-primary-500/10 text-primary-300'
-                    : 'border-surface-border text-gray-500 hover:bg-surface-hover'
-                )}>
-                  <input type="checkbox" checked={entryForm[key]}
-                    onChange={e => setEntryForm(f => ({ ...f, [key]: e.target.checked }))}
-                    className="hidden" />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
+                {/* 开关选项 */}
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { key: 'enabled', label: '启用' },
+                    { key: 'constant', label: '常驻（无需关键词）' },
+                    { key: 'case_sensitive', label: '大小写敏感' },
+                  ].map(({ key, label }) => (
+                    <label key={key} className={clsx(
+                      'flex items-center gap-2 cursor-pointer px-3 py-2 rounded-lg border text-xs transition-colors',
+                      entryForm[key]
+                        ? 'border-primary-500/40 bg-primary-500/10 text-primary-300'
+                        : 'border-surface-border text-gray-500 hover:bg-surface-hover'
+                    )}>
+                      <input type="checkbox" checked={entryForm[key]}
+                        onChange={e => setEntryForm(f => ({ ...f, [key]: e.target.checked }))}
+                        className="hidden" />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
 
-            {/* 说明 */}
-            <div className="text-[10px] text-gray-600 bg-surface/50 p-3 rounded-lg border border-surface-border leading-relaxed">
-              <p><b>主关键词</b>: OR 逻辑，任一命中即触发</p>
-              <p><b>次关键词</b>: AND 逻辑，需与主关键词同时命中</p>
-              <p><b>深度0</b>=紧跟系统提示词 | <b>深度N(相对)</b>=从末尾倒数第N条 | <b>深度N(绝对)</b>=第N条后</p>
-              <p><b>常驻</b>: 无需关键词触发，每次对话都注入</p>
-              <p><b>扫描深度</b>: 往回扫描几条消息寻找关键词，0=扫描全部</p>
-            </div>
+                {/* 说明 */}
+                <div className="text-[10px] text-gray-600 bg-surface/50 p-3 rounded-lg border border-surface-border leading-relaxed">
+                  <p><b>主关键词</b>: OR 逻辑，任一命中即触发</p>
+                  <p><b>次关键词</b>: AND 逻辑，需与主关键词同时命中</p>
+                  <p><b>深度0</b>=紧跟系统提示词 | <b>深度N(相对)</b>=从末尾倒数第N条 | <b>深度N(绝对)</b>=第N条后</p>
+                  <p><b>常驻</b>: 无需关键词触发，每次对话都注入</p>
+                  <p><b>扫描深度</b>: 往回扫描几条消息寻找关键词，0=扫描全部</p>
+                </div>
 
-            <div className="flex gap-3 pt-2">
-              <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}
-                className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
-                           hover:bg-surface-hover transition-colors">取消</button>
-              <button onClick={handleSaveEntry} className="flex-1 btn-primary py-3">保存</button>
-            </div>
+                <div className="flex gap-3 pt-2">
+                  <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}
+                    className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300
+                               hover:bg-surface-hover transition-colors">取消</button>
+                  <button onClick={handleSaveEntry} className="flex-1 btn-primary py-3">保存</button>
+                </div>
+              </>
+            )}
           </div>
         </Modal>
       </div>

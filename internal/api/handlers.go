@@ -27,6 +27,54 @@ type Handlers struct {
 	summaryService *service.SummaryService
 }
 
+const (
+	statusBarEntryKey             = "状态栏"
+	defaultStatusBarTemplate      = "'''\n【状态栏】\n时间：{{time}}\n地点：{{location}}\n我方状态：{{user_state}}\n对方状态：{{char_state}}\n关系：{{relationship}}\n当前事件：{{current_event}}\n'''\n"
+	statusBarInjectionPosition    = 1
+	statusBarInjectionDepth       = 0
+	statusBarOrder                = 0
+	statusBarRole                 = "system"
+)
+
+func isStatusBarEntry(entry *model.WorldBookEntry) bool {
+	return entry != nil && strings.TrimSpace(entry.Keys) == statusBarEntryKey
+}
+
+func buildStatusBarEntry(worldBookID string) model.WorldBookEntry {
+	return model.WorldBookEntry{
+		WorldBookID:    worldBookID,
+		Keys:           statusBarEntryKey,
+		SecondaryKeys:  "",
+		Content:        defaultStatusBarTemplate,
+		Enabled:        true,
+		Constant:       true,
+		Priority:       0,
+		InjectionPos:   statusBarInjectionPosition,
+		InjectionDepth: statusBarInjectionDepth,
+		ScanDepth:      0,
+		CaseSensitive:  false,
+		Order:          statusBarOrder,
+		Role:           statusBarRole,
+	}
+}
+
+func sanitizeStatusBarEntryForUpdate(existing *model.WorldBookEntry, incoming *model.WorldBookEntry) {
+	if existing == nil || incoming == nil {
+		return
+	}
+	incoming.WorldBookID = existing.WorldBookID
+	incoming.Keys = statusBarEntryKey
+	incoming.SecondaryKeys = ""
+	incoming.Constant = true
+	incoming.Priority = existing.Priority
+	incoming.InjectionPos = statusBarInjectionPosition
+	incoming.InjectionDepth = statusBarInjectionDepth
+	incoming.ScanDepth = 0
+	incoming.CaseSensitive = false
+	incoming.Order = statusBarOrder
+	incoming.Role = statusBarRole
+}
+
 func NewHandlers(
 	characterStore *store.CharacterStore,
 	chatStore *store.ChatStore,
@@ -748,6 +796,13 @@ func (h *Handlers) CreateWorldBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if strings.TrimSpace(wb.CharacterID) != "" {
+		statusEntry := buildStatusBarEntry(wb.ID)
+		if err := h.worldBookStore.CreateEntry(&statusEntry, userID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	c.JSON(http.StatusCreated, wb)
 }
 
@@ -786,6 +841,15 @@ func (h *Handlers) CreateWorldBookEntry(c *gin.Context) {
 		return
 	}
 	entry.WorldBookID = c.Param("id")
+	if isStatusBarEntry(&entry) {
+		special := buildStatusBarEntry(entry.WorldBookID)
+		special.Content = entry.Content
+		if strings.TrimSpace(special.Content) == "" {
+			special.Content = defaultStatusBarTemplate
+		}
+		special.Enabled = entry.Enabled
+		entry = special
+	}
 	if err := h.worldBookStore.CreateEntry(&entry, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -802,6 +866,20 @@ func (h *Handlers) UpdateWorldBookEntry(c *gin.Context) {
 		return
 	}
 	entry.ID = c.Param("entryId")
+
+	existing, err := h.worldBookStore.GetEntryByID(entry.ID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "条目不存在"})
+		return
+	}
+	if isStatusBarEntry(existing) {
+		sanitizeStatusBarEntryForUpdate(existing, &entry)
+	}
+
 	if err := h.worldBookStore.UpdateEntry(&entry, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -812,6 +890,19 @@ func (h *Handlers) UpdateWorldBookEntry(c *gin.Context) {
 // DeleteWorldBookEntry DELETE /api/worldbooks/entries/:entryId
 func (h *Handlers) DeleteWorldBookEntry(c *gin.Context) {
 	userID := GetUserID(c)
+	existing, err := h.worldBookStore.GetEntryByID(c.Param("entryId"), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "条目不存在"})
+		return
+	}
+	if isStatusBarEntry(existing) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "状态栏特殊条目不允许删除"})
+		return
+	}
 	if err := h.worldBookStore.DeleteEntry(c.Param("entryId"), userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -1,10 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
-	"litechat/internal/model"
 	"strconv"
 	"time"
+
+	"litechat/internal/model"
 
 	"github.com/google/uuid"
 )
@@ -337,6 +339,30 @@ func (s *WorldBookStore) ListAllEntries(userID string, characterID string) ([]mo
 		list = append(list, e)
 	}
 	return list, nil
+}
+
+func (s *WorldBookStore) GetEntryByID(id string, userID string) (*model.WorldBookEntry, error) {
+	row := s.db.QueryRow(`
+		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
+		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
+		       created_at, updated_at
+		FROM world_book_entries WHERE id = ? AND user_id = ?`, id, userID)
+
+	entry := &model.WorldBookEntry{}
+	var enabled, constant, caseSensitive int
+	if err := row.Scan(&entry.ID, &entry.UserID, &entry.WorldBookID, &entry.Keys, &entry.SecondaryKeys, &entry.Content,
+		&enabled, &constant, &entry.Priority,
+		&entry.InjectionPos, &entry.InjectionDepth, &entry.ScanDepth, &caseSensitive,
+		&entry.Order, &entry.Role, &entry.CreatedAt, &entry.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	entry.Enabled = enabled == 1
+	entry.Constant = constant == 1
+	entry.CaseSensitive = caseSensitive == 1
+	return entry, nil
 }
 
 func (s *WorldBookStore) UpdateEntry(e *model.WorldBookEntry, userID string) error {
