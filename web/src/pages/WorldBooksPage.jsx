@@ -27,8 +27,12 @@ const DEFAULT_STATUS_BAR_TEMPLATE = `'''
 const DEFAULT_ENTRY = {
   keys: '', secondary_keys: '', content: '', enabled: true, constant: false,
   priority: 0, injection_position: 0, injection_depth: 4, scan_depth: 0,
-  case_sensitive: false, order: 100, role: 'system',
+  case_sensitive: false, order: 100, role: 'system', bg_color: '', font_color: '',
 }
+
+// 状态栏配色默认值（仅用于取色器的初始显示，留空表示沿用聊天界面默认主题）
+const STATUS_BAR_PICKER_BG = '#0b3a4a'
+const STATUS_BAR_PICKER_FG = '#a5f3fc'
 
 export default function WorldBooksPage() {
   const { worldBooks, currentBook, fetchWorldBooks, createWorldBook, deleteWorldBook,
@@ -260,6 +264,55 @@ export default function WorldBooksPage() {
                     onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
                     placeholder="在此定义状态栏的字段与包裹样式" />
                 </div>
+
+                {/* 本地渲染配色：聊天界面展示状态栏时使用，不影响发给 AI 的内容 */}
+                <div className="rounded-lg border border-surface-border p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-gray-400">状态栏配色（本地渲染）</label>
+                    <button
+                      type="button"
+                      onClick={() => setEntryForm(f => ({ ...f, bg_color: '', font_color: '' }))}
+                      className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">
+                      恢复默认
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="block text-[10px] text-gray-500 mb-1">背景色</span>
+                      <div className="flex items-center gap-2">
+                        <input type="color"
+                          value={entryForm.bg_color || STATUS_BAR_PICKER_BG}
+                          onChange={e => setEntryForm(f => ({ ...f, bg_color: e.target.value }))}
+                          className="h-8 w-10 rounded cursor-pointer bg-transparent border border-surface-border p-0.5" />
+                        <span className="text-[11px] text-gray-500">{entryForm.bg_color || '默认'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] text-gray-500 mb-1">字体色</span>
+                      <div className="flex items-center gap-2">
+                        <input type="color"
+                          value={entryForm.font_color || STATUS_BAR_PICKER_FG}
+                          onChange={e => setEntryForm(f => ({ ...f, font_color: e.target.value }))}
+                          className="h-8 w-10 rounded cursor-pointer bg-transparent border border-surface-border p-0.5" />
+                        <span className="text-[11px] text-gray-500">{entryForm.font_color || '默认'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-gray-500 mb-1">预览</span>
+                    <pre className="px-3 py-2 rounded-lg text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words border border-surface-border"
+                      style={{
+                        backgroundColor: entryForm.bg_color || undefined,
+                        color: entryForm.font_color || undefined,
+                      }}>
+{`【状态栏】
+时间：08:30
+地点：旧书店
+关系：朋友`}
+                    </pre>
+                  </div>
+                </div>
+
                 <div className="flex gap-3 pt-2">
                   <button onClick={() => { setShowEntryEditor(false); setEditEntry(null) }}
                     className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300

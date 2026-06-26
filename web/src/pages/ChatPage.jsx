@@ -298,6 +298,7 @@ export default function ChatPage() {
             key={msg.id}
             message={msg}
             character={character}
+            statusBarStyle={{ bg: chat?.status_bar_bg, fg: chat?.status_bar_fg }}
             onRegenerate={msg.id === latestAssistantMessageId ? handleRegenerate : undefined}
             onRetry={msg.id === latestUserMessageId ? handleRetryLastRequest : undefined}
             onDeleteCascade={msgId => deleteMessageCascade(chatId, msgId)}

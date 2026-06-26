@@ -28,7 +28,7 @@ function splitStatusBar(content) {
   return { body: body.replace(/[ \t]*(?:```|''')[^\n]*\n?$/g, '').trimEnd(), statusBar }
 }
 
-export default function MessageBubble({ message, character, onRegenerate, onRetry, onDeleteCascade }) {
+export default function MessageBubble({ message, character, statusBarStyle, onRegenerate, onRetry, onDeleteCascade }) {
   const [copied, setCopied] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [statusOpen, setStatusOpen] = useState(false)
@@ -89,15 +89,22 @@ export default function MessageBubble({ message, character, onRegenerate, onRetr
                     return <MessageContent content={message.content} isUser={false} />
                   }
                   const { body, statusBar } = splitStatusBar(message.content)
+                  const sbBg = statusBarStyle?.bg || ''
+                  const sbFg = statusBarStyle?.fg || ''
+                  const sbBlockStyle = sbBg ? { backgroundColor: sbBg, borderColor: sbBg } : undefined
+                  const sbTextStyle = sbFg ? { color: sbFg } : undefined
                   return (
                     <>
                       <MessageContent content={body} isUser={false} />
                       {statusBar && (
-                        <div className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.04] overflow-hidden">
+                        <div
+                          className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.04] overflow-hidden"
+                          style={sbBlockStyle}>
                           <button
                             onClick={(e) => { e.stopPropagation(); setStatusOpen(o => !o) }}
+                            style={sbTextStyle}
                             className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium
-                                       text-cyan-300/90 hover:bg-cyan-500/10 transition-colors select-none">
+                                       text-cyan-300/90 hover:bg-black/10 transition-colors select-none">
                             <Activity size={12} />
                             <span>状态栏</span>
                             <span className="ml-auto">
@@ -105,7 +112,9 @@ export default function MessageBubble({ message, character, onRegenerate, onRetr
                             </span>
                           </button>
                           {statusOpen && (
-                            <pre className="px-3 py-2 text-[12px] leading-relaxed text-cyan-100/90
+                            <pre
+                              style={sbTextStyle}
+                              className="px-3 py-2 text-[12px] leading-relaxed text-cyan-100/90
                                             font-mono whitespace-pre-wrap break-words border-t border-cyan-500/15">
                               {statusBar}
                             </pre>

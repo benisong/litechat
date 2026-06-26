@@ -48,6 +48,9 @@ type Chat struct {
 	Character   *Character `json:"character,omitempty" db:"-"`
 	LastMessage string     `json:"last_message,omitempty" db:"-"`
 	MsgCount    int        `json:"msg_count,omitempty" db:"-"`
+	// 状态栏本地渲染配色（来自角色绑定世界书的状态栏条目，供前端渲染用）
+	StatusBarBg string `json:"status_bar_bg,omitempty" db:"-"`
+	StatusBarFg string `json:"status_bar_fg,omitempty" db:"-"`
 }
 
 // Message 消息模型
@@ -119,6 +122,9 @@ type WorldBookEntry struct {
 	CaseSensitive  bool      `json:"case_sensitive" db:"case_sensitive"`
 	Order          int       `json:"order" db:"order_num"`
 	Role           string    `json:"role" db:"role"`
+	// 状态栏专用的本地渲染配色（仅状态栏特殊条目使用，普通条目留空）
+	BgColor        string    `json:"bg_color" db:"bg_color"`
+	FontColor      string    `json:"font_color" db:"font_color"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }

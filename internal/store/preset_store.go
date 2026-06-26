@@ -266,12 +266,12 @@ func (s *WorldBookStore) CreateEntry(e *model.WorldBookEntry, userID string) err
 	_, err := s.db.Exec(`
 		INSERT INTO world_book_entries
 			(id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
-			 injection_position, injection_depth, scan_depth, case_sensitive, order_num, role, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 injection_position, injection_depth, scan_depth, case_sensitive, order_num, role, bg_color, font_color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.UserID, e.WorldBookID, e.Keys, e.SecondaryKeys, e.Content,
 		boolToInt(e.Enabled), boolToInt(e.Constant), e.Priority,
 		e.InjectionPos, e.InjectionDepth, e.ScanDepth, boolToInt(e.CaseSensitive),
-		e.Order, e.Role, e.CreatedAt, e.UpdatedAt,
+		e.Order, e.Role, e.BgColor, e.FontColor, e.CreatedAt, e.UpdatedAt,
 	)
 	return err
 }
@@ -280,7 +280,7 @@ func (s *WorldBookStore) ListEntries(worldBookID string, userID string) ([]model
 	rows, err := s.db.Query(`
 		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
 		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
-		       created_at, updated_at
+		       bg_color, font_color, created_at, updated_at
 		FROM world_book_entries WHERE world_book_id = ? AND user_id = ?
 		ORDER BY priority DESC, order_num ASC`, worldBookID, userID)
 	if err != nil {
@@ -295,7 +295,7 @@ func (s *WorldBookStore) ListEntries(worldBookID string, userID string) ([]model
 		if err := rows.Scan(&e.ID, &e.UserID, &e.WorldBookID, &e.Keys, &e.SecondaryKeys, &e.Content,
 			&enabled, &constant, &e.Priority,
 			&e.InjectionPos, &e.InjectionDepth, &e.ScanDepth, &caseSensitive,
-			&e.Order, &e.Role, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.Order, &e.Role, &e.BgColor, &e.FontColor, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		e.Enabled = enabled == 1
@@ -312,7 +312,7 @@ func (s *WorldBookStore) ListAllEntries(userID string, characterID string) ([]mo
 	rows, err := s.db.Query(`
 		SELECT e.id, e.user_id, e.world_book_id, e.keys, e.secondary_keys, e.content, e.enabled, e.constant, e.priority,
 		       e.injection_position, e.injection_depth, e.scan_depth, e.case_sensitive, e.order_num, e.role,
-		       e.created_at, e.updated_at
+		       e.bg_color, e.font_color, e.created_at, e.updated_at
 		FROM world_book_entries e
 		JOIN world_books wb ON wb.id = e.world_book_id
 		WHERE e.enabled = 1 AND e.user_id = ?
@@ -330,7 +330,7 @@ func (s *WorldBookStore) ListAllEntries(userID string, characterID string) ([]mo
 		if err := rows.Scan(&e.ID, &e.UserID, &e.WorldBookID, &e.Keys, &e.SecondaryKeys, &e.Content,
 			&enabled, &constant, &e.Priority,
 			&e.InjectionPos, &e.InjectionDepth, &e.ScanDepth, &caseSensitive,
-			&e.Order, &e.Role, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.Order, &e.Role, &e.BgColor, &e.FontColor, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		e.Enabled = enabled == 1
@@ -341,11 +341,42 @@ func (s *WorldBookStore) ListAllEntries(userID string, characterID string) ([]mo
 	return list, nil
 }
 
+// GetStatusBarEntry 查询指定角色绑定世界书里的状态栏特殊条目（用于读取本地渲染配色，不限是否启用）
+func (s *WorldBookStore) GetStatusBarEntry(userID string, characterID string) (*model.WorldBookEntry, error) {
+	if characterID == "" {
+		return nil, nil
+	}
+	row := s.db.QueryRow(`
+		SELECT e.id, e.user_id, e.world_book_id, e.keys, e.secondary_keys, e.content, e.enabled, e.constant, e.priority,
+		       e.injection_position, e.injection_depth, e.scan_depth, e.case_sensitive, e.order_num, e.role,
+		       e.bg_color, e.font_color, e.created_at, e.updated_at
+		FROM world_book_entries e
+		JOIN world_books wb ON wb.id = e.world_book_id
+		WHERE e.user_id = ? AND wb.character_id = ? AND e.keys = '状态栏'
+		ORDER BY e.updated_at DESC LIMIT 1`, userID, characterID)
+
+	entry := &model.WorldBookEntry{}
+	var enabled, constant, caseSensitive int
+	if err := row.Scan(&entry.ID, &entry.UserID, &entry.WorldBookID, &entry.Keys, &entry.SecondaryKeys, &entry.Content,
+		&enabled, &constant, &entry.Priority,
+		&entry.InjectionPos, &entry.InjectionDepth, &entry.ScanDepth, &caseSensitive,
+		&entry.Order, &entry.Role, &entry.BgColor, &entry.FontColor, &entry.CreatedAt, &entry.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	entry.Enabled = enabled == 1
+	entry.Constant = constant == 1
+	entry.CaseSensitive = caseSensitive == 1
+	return entry, nil
+}
+
 func (s *WorldBookStore) GetEntryByID(id string, userID string) (*model.WorldBookEntry, error) {
 	row := s.db.QueryRow(`
 		SELECT id, user_id, world_book_id, keys, secondary_keys, content, enabled, constant, priority,
 		       injection_position, injection_depth, scan_depth, case_sensitive, order_num, role,
-		       created_at, updated_at
+		       bg_color, font_color, created_at, updated_at
 		FROM world_book_entries WHERE id = ? AND user_id = ?`, id, userID)
 
 	entry := &model.WorldBookEntry{}
@@ -353,7 +384,7 @@ func (s *WorldBookStore) GetEntryByID(id string, userID string) (*model.WorldBoo
 	if err := row.Scan(&entry.ID, &entry.UserID, &entry.WorldBookID, &entry.Keys, &entry.SecondaryKeys, &entry.Content,
 		&enabled, &constant, &entry.Priority,
 		&entry.InjectionPos, &entry.InjectionDepth, &entry.ScanDepth, &caseSensitive,
-		&entry.Order, &entry.Role, &entry.CreatedAt, &entry.UpdatedAt); err != nil {
+		&entry.Order, &entry.Role, &entry.BgColor, &entry.FontColor, &entry.CreatedAt, &entry.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -373,11 +404,11 @@ func (s *WorldBookStore) UpdateEntry(e *model.WorldBookEntry, userID string) err
 	_, err := s.db.Exec(`
 		UPDATE world_book_entries SET keys=?, secondary_keys=?, content=?, enabled=?, constant=?,
 			priority=?, injection_position=?, injection_depth=?, scan_depth=?, case_sensitive=?,
-			order_num=?, role=?, updated_at=?
+			order_num=?, role=?, bg_color=?, font_color=?, updated_at=?
 		WHERE id=? AND user_id=?`,
 		e.Keys, e.SecondaryKeys, e.Content, boolToInt(e.Enabled), boolToInt(e.Constant),
 		e.Priority, e.InjectionPos, e.InjectionDepth, e.ScanDepth, boolToInt(e.CaseSensitive),
-		e.Order, e.Role, e.UpdatedAt, e.ID, userID,
+		e.Order, e.Role, e.BgColor, e.FontColor, e.UpdatedAt, e.ID, userID,
 	)
 	return err
 }

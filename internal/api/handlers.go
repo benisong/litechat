@@ -517,6 +517,11 @@ func (h *Handlers) GetChat(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
 		return
 	}
+	// 附带状态栏本地渲染配色（来自角色绑定世界书的状态栏条目），供前端渲染
+	if entry, e := h.worldBookStore.GetStatusBarEntry(userID, chat.CharacterID); e == nil && entry != nil {
+		chat.StatusBarBg = entry.BgColor
+		chat.StatusBarFg = entry.FontColor
+	}
 	c.JSON(http.StatusOK, chat)
 }
 
@@ -848,6 +853,8 @@ func (h *Handlers) CreateWorldBookEntry(c *gin.Context) {
 			special.Content = defaultStatusBarTemplate
 		}
 		special.Enabled = entry.Enabled
+		special.BgColor = entry.BgColor
+		special.FontColor = entry.FontColor
 		entry = special
 	}
 	if err := h.worldBookStore.CreateEntry(&entry, userID); err != nil {

@@ -115,6 +115,8 @@ func (db *DB) InitSchema() error {
 		case_sensitive     INTEGER DEFAULT 0,
 		order_num          INTEGER DEFAULT 100,
 		role               TEXT DEFAULT 'system',
+		bg_color           TEXT DEFAULT '',
+		font_color         TEXT DEFAULT '',
 		created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -234,6 +236,8 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN case_sensitive INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN order_num INTEGER DEFAULT 100`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN role TEXT DEFAULT 'system'`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN bg_color TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN font_color TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
 	db.Exec(`ALTER TABLE users ADD COLUMN user_name TEXT DEFAULT ''`)
