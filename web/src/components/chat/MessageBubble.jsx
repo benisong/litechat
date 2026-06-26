@@ -75,7 +75,7 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
           )}
 
           <div className={clsx(
-            'text-sm leading-relaxed break-words',
+            'chat-text leading-relaxed break-words',
             isUser ? 'bubble-user' : 'bubble-ai',
             isStreaming && !message.content && 'min-w-[60px] min-h-[36px]'
           )}>

@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = {
   memory_model: '',
   memory_prompt_suffix: '',
   theme: 'dark',
+  chat_font_size: '0.875rem',
   service_mode: 'self',
 }
 
@@ -550,12 +551,18 @@ export const useSettingsStore = create(
           // 主题用本地存储的值，不被后端覆盖
           const localTheme = localStorage.getItem('litechat-theme')
           if (localTheme) data.theme = localTheme
+          // 聊天字号为本地显示偏好，不走后端
+          const localFontSize = localStorage.getItem('litechat-chat-font-size')
+          const fontSize = localFontSize || get().settings.chat_font_size || DEFAULT_SETTINGS.chat_font_size
+          data.chat_font_size = fontSize
           set({ settings: { ...DEFAULT_SETTINGS, ...get().settings, ...data }, loaded: true })
           // 同步主题到 DOM
           const theme = data.theme || 'dark'
           document.documentElement.className = theme
           const meta = document.querySelector('meta[name="theme-color"]')
           if (meta) meta.content = theme === 'light' ? '#f8f9fa' : '#0f0f0f'
+          // 同步聊天字号到 CSS 变量
+          document.documentElement.style.setProperty('--chat-font-size', fontSize)
         } catch {}
       },
 
@@ -571,6 +578,13 @@ export const useSettingsStore = create(
         localStorage.setItem('litechat-theme', theme)
         const meta = document.querySelector('meta[name="theme-color"]')
         if (meta) meta.content = theme === 'light' ? '#f8f9fa' : '#0f0f0f'
+      },
+
+      setChatFontSize: (size) => {
+        set(s => ({ settings: { ...s.settings, chat_font_size: size } }))
+        // 聊天字号是本地显示偏好，立即生效并持久化
+        localStorage.setItem('litechat-chat-font-size', size)
+        document.documentElement.style.setProperty('--chat-font-size', size)
       },
     }),
     {

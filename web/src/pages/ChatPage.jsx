@@ -286,7 +286,7 @@ export default function ChatPage() {
             <Avatar name={character.name} src={character.avatar_url} size="sm" className="mt-0.5" />
             <div className="flex flex-col gap-1 max-w-[78%]">
               <span className="text-xs text-gray-500 px-1">{character.name}</span>
-              <div className="bubble-ai text-sm leading-relaxed whitespace-pre-wrap">
+              <div className="bubble-ai chat-text leading-relaxed whitespace-pre-wrap">
                 {displayFirstMsg}
               </div>
             </div>

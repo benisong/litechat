@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* 聊天消息字号，可在设置页调节（默认 0.875rem ≈ 14px） */
+  --chat-font-size: 0.875rem;
+}
+
 @layer base {
   * {
     -webkit-tap-highlight-color: transparent;
@@ -77,6 +82,11 @@
   .card {
     @apply bg-surface rounded-2xl border border-surface-border overflow-hidden;
   }
+}
+
+/* 聊天消息文字字号（跟随设置页的“聊天字号”，markdown 内容继承本字号） */
+.chat-text {
+  font-size: var(--chat-font-size, 0.875rem);
 }
 
 /* 打字动画光标 */

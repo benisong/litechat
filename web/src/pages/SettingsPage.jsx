@@ -24,8 +24,16 @@ const PRESET_ENDPOINTS = [
   { label: 'Groq', value: 'https://api.groq.com/openai/v1' },
 ]
 
+// 聊天字号档位（本地显示偏好，立即生效）
+const CHAT_FONT_SIZES = [
+  { label: '小', value: '0.8125rem' },
+  { label: '标准', value: '0.875rem' },
+  { label: '大', value: '0.9375rem' },
+  { label: '特大', value: '1.0625rem' },
+]
+
 export default function SettingsPage() {
-  const { settings, fetchSettings, saveSettings, setTheme } = useSettingsStore()
+  const { settings, fetchSettings, saveSettings, setTheme, setChatFontSize } = useSettingsStore()
   const { showToast } = useUIStore()
   const { user, logout, updateProfile } = useAuthStore()
   const navigate = useNavigate()
@@ -491,30 +499,61 @@ export default function SettingsPage() {
 
         <section>
           <h2 className="mb-3 px-1 text-xs font-medium uppercase tracking-wider text-gray-400">外观</h2>
-          <div className="card p-4">
-            <label className="mb-3 block text-xs text-gray-400">主题</label>
-            <div className="flex gap-3">
-              {[
-                { value: 'dark', label: '深色', icon: Moon },
-                { value: 'light', label: '浅色', icon: Sun },
-              ].map(({ value, label, icon: Icon }) => (
-                <button
-                  key={value}
-                  onClick={() => {
-                    setForm(f => ({ ...f, theme: value }))
-                    setTheme(value)
-                  }}
-                  className={clsx(
-                    'flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 transition-all duration-150',
-                    form.theme === value
-                      ? 'border-primary-500/50 bg-primary-500/10 text-primary-300'
-                      : 'border-surface-border text-gray-400 hover:bg-surface-hover'
-                  )}
-                >
-                  <Icon size={16} />
-                  <span className="text-sm font-medium">{label}</span>
-                </button>
-              ))}
+          <div className="card p-4 space-y-5">
+            <div>
+              <label className="mb-3 block text-xs text-gray-400">主题</label>
+              <div className="flex gap-3">
+                {[
+                  { value: 'dark', label: '深色', icon: Moon },
+                  { value: 'light', label: '浅色', icon: Sun },
+                ].map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      setForm(f => ({ ...f, theme: value }))
+                      setTheme(value)
+                    }}
+                    className={clsx(
+                      'flex flex-1 items-center justify-center gap-2 rounded-xl border py-3 transition-all duration-150',
+                      form.theme === value
+                        ? 'border-primary-500/50 bg-primary-500/10 text-primary-300'
+                        : 'border-surface-border text-gray-400 hover:bg-surface-hover'
+                    )}
+                  >
+                    <Icon size={16} />
+                    <span className="text-sm font-medium">{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-3 block text-xs text-gray-400">聊天字号</label>
+              <div className="flex gap-2">
+                {CHAT_FONT_SIZES.map(({ label, value }) => (
+                  <button
+                    key={value}
+                    onClick={() => {
+                      setForm(f => ({ ...f, chat_font_size: value }))
+                      setChatFontSize(value)
+                    }}
+                    className={clsx(
+                      'flex-1 rounded-xl border py-2.5 text-sm font-medium transition-all duration-150',
+                      (form.chat_font_size || '0.875rem') === value
+                        ? 'border-primary-500/50 bg-primary-500/10 text-primary-300'
+                        : 'border-surface-border text-gray-400 hover:bg-surface-hover'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 rounded-xl border border-surface-border bg-surface/50 px-3 py-2.5">
+                <p className="leading-relaxed text-gray-300" style={{ fontSize: form.chat_font_size || '0.875rem' }}>
+                  预览：晚风拂过旧书店的窗台，她抬眼看你，轻声说了句什么。
+                </p>
+              </div>
+              <p className="mt-1.5 px-1 text-[11px] text-gray-500">字号为本机显示偏好，调整后立即生效并保存在当前设备。</p>
             </div>
           </div>
         </section>
