@@ -36,7 +36,7 @@ const STATUS_BAR_PICKER_FG = '#a5f3fc'
 
 export default function WorldBooksPage() {
   const { worldBooks, currentBook, fetchWorldBooks, createWorldBook, deleteWorldBook,
-          fetchWorldBook, createEntry, updateEntry, deleteEntry } = useWorldBookStore()
+          fetchWorldBook, createEntry, updateEntry, deleteEntry, fetchEntryTemplates } = useWorldBookStore()
   const { showToast } = useUIStore()
 
   const { characters, fetchCharacters } = useCharacterStore()
@@ -44,11 +44,13 @@ export default function WorldBooksPage() {
   const [view, setView] = useState('list')
   const [showWarning, setShowWarning] = useState(false) // 新建前的警告弹窗
   const [showNewBook, setShowNewBook] = useState(false)
-  const [newBookForm, setNewBookForm] = useState({ name: '', description: '', character_id: '' })
+  const [newBookForm, setNewBookForm] = useState({ name: '', description: '', character_id: '', enable_text_fix: true })
   const [showEntryEditor, setShowEntryEditor] = useState(false)
   const [entryForm, setEntryForm] = useState({ ...DEFAULT_ENTRY })
   const [editEntry, setEditEntry] = useState(null)
   const [expandedEntry, setExpandedEntry] = useState(null) // 条目列表中展开详情
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false) // 新建条目时的模板选择弹窗
+  const [entryTemplates, setEntryTemplates] = useState([])
 
   useEffect(() => { fetchWorldBooks(); fetchCharacters() }, [])
 
@@ -63,7 +65,7 @@ export default function WorldBooksPage() {
       // 状态栏特殊条目由后端在绑定角色卡时自动创建，前端不再重复创建
       const wb = await createWorldBook(newBookForm)
       setShowNewBook(false)
-      setNewBookForm({ name: '', description: '', character_id: '' })
+      setNewBookForm({ name: '', description: '', character_id: '', enable_text_fix: true })
       showToast('世界书创建成功', 'success')
       // 打开新建的世界书
       await fetchWorldBook(wb.id)
@@ -77,6 +79,32 @@ export default function WorldBooksPage() {
       await deleteWorldBook(id)
       showToast('世界书已删除', 'success')
     } catch { showToast('删除失败', 'error') }
+  }
+
+  const openTemplatePicker = async () => {
+    setShowTemplatePicker(true)
+    try {
+      const tpls = await fetchEntryTemplates()
+      setEntryTemplates(tpls)
+    } catch { setEntryTemplates([]) }
+  }
+
+  // 选模板 -> 用模板内容填充 entryForm，进入普通条目编辑器
+  const applyTemplate = (tpl) => {
+    setShowTemplatePicker(false)
+    if (!tpl) {
+      // 空白条目
+      setEntryForm({ ...DEFAULT_ENTRY })
+    } else {
+      setEntryForm({
+        ...DEFAULT_ENTRY,
+        keys: tpl.keys || '',
+        content: tpl.content || '',
+        constant: !!tpl.constant,
+      })
+    }
+    setEditEntry(null)
+    setShowEntryEditor(true)
   }
 
   const openEntryEditor = (entry = null) => {
@@ -134,7 +162,7 @@ export default function WorldBooksPage() {
             )}
           </div>
           <button
-            onClick={() => openEntryEditor()}
+            onClick={() => openTemplatePicker()}
             className="btn-primary flex items-center gap-1.5 py-2 px-3 text-sm"
           >
             <Plus size={15} /> 添加
@@ -244,6 +272,36 @@ export default function WorldBooksPage() {
             </div>
           ))}
         </div>
+
+        {/* 新建条目 - 模板选择弹窗 */}
+        <Modal open={showTemplatePicker} onClose={() => setShowTemplatePicker(false)} title="选择条目模板">
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              从下面的标准模板快速生成一条条目，生成后可在编辑界面自行修改；也可以新建空白条目。
+            </p>
+            <div className="space-y-2">
+              {entryTemplates.map(tpl => (
+                <button
+                  key={tpl.key}
+                  onClick={() => applyTemplate(tpl)}
+                  className="w-full text-left rounded-lg border border-primary-600/20 bg-primary-600/5
+                             hover:bg-primary-600/15 transition-colors p-3"
+                >
+                  <div className="text-sm font-medium text-primary-200">{tpl.label}</div>
+                  {tpl.desc && <div className="text-xs text-gray-500 mt-0.5">{tpl.desc}</div>}
+                </button>
+              ))}
+              <button
+                onClick={() => applyTemplate(null)}
+                className="w-full text-left rounded-lg border border-gray-600/30 bg-gray-700/20
+                           hover:bg-gray-700/40 transition-colors p-3"
+              >
+                <div className="text-sm font-medium text-gray-200">空白条目</div>
+                <div className="text-xs text-gray-500 mt-0.5">从零开始手动填写。</div>
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         {/* 条目编辑弹窗 */}
         <Modal open={showEntryEditor} onClose={() => { setShowEntryEditor(false); setEditEntry(null) }}
@@ -604,6 +662,21 @@ export default function WorldBooksPage() {
               onChange={e => setNewBookForm(f => ({ ...f, description: e.target.value }))}
               placeholder="简短描述这个世界书的内容" />
           </div>
+
+          {/* AI 文字问题修正：仅全局世界书可选，默认勾选 */}
+          {newBookForm.character_id === '' && (
+            <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border border-primary-600/20 bg-primary-600/5 p-3">
+              <input type="checkbox"
+                className="mt-0.5 accent-primary-500"
+                checked={newBookForm.enable_text_fix}
+                onChange={e => setNewBookForm(f => ({ ...f, enable_text_fix: e.target.checked }))} />
+              <span className="text-xs text-gray-300 leading-relaxed">
+                <b className="text-primary-200">AI 文字问题修正</b><br />
+                自动加入一条全局生效的纠错条目，约束套路化描写、烂俗比喻与生理夸张。创建后可在条目中自行修改。
+              </span>
+            </label>
+          )}
+
           <div className="flex gap-3 pt-2">
             <button onClick={() => setShowNewBook(false)}
               className="flex-1 py-3 rounded-xl border border-surface-border text-gray-300

@@ -67,6 +67,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		// 世界书
 		api.GET("/worldbooks", h.ListWorldBooks)
 		api.POST("/worldbooks", h.CreateWorldBook)
+		api.GET("/worldbook-templates", h.ListEntryTemplates)
 		api.GET("/worldbooks/:id", h.GetWorldBook)
 		api.PUT("/worldbooks/:id", h.UpdateWorldBook)
 		api.DELETE("/worldbooks/:id", h.DeleteWorldBook)

@@ -40,6 +40,98 @@ func isStatusBarEntry(entry *model.WorldBookEntry) bool {
 	return entry != nil && strings.TrimSpace(entry.Keys) == statusBarEntryKey
 }
 
+// ===== AI 文字问题修正（默认全局纠错条目）=====
+
+const textFixEntryKey = "文字问题修正"
+
+// defaultTextFixInstruction：指令逻辑用英文（约束力更强），仅点名的中文套路样本保留中文。
+const defaultTextFixInstruction = `[Writing Style Correction · Constraints]
+
+The following rules apply to all of your narration and description from now on. The goal is to keep the prose specific, restrained, and grounded in this particular character and this particular moment — avoiding clichéd, cheap, or exaggerated expression. Always write in Chinese; only the reasoning of these rules is in English.
+
+1. Avoid clichéd body-language and micro-expression descriptions.
+Stock phrases such as "指节发白", "喉结滚动", "瞳孔骤缩", "心头一颤", "呼吸一滞", "血液凝固", "眼底闪过一丝××", "嘴角勾起一抹弧度", "眸光微动" have been so overused that they are now cheap, predictable, and applicable to any character in any scene — they carry almost no information. Avoid them. When you do describe a physical reaction, write something that genuinely belongs to THIS character in THIS situation: a small gesture with personal character, a specific action interrupted mid-way, a sentence left unfinished — not a generic template.
+
+2. Avoid worn-out metaphors and atmospheric clichés.
+Comparisons and mood-setting phrases like "眼泪像断了线的珠子", "像石头掉进湖里", "心如刀绞", "如坠冰窟", "空气仿佛凝固", "时间静止", "世界只剩两人" are equally stale. Do not lean on them to convey emotion. Let emotion emerge from concrete detail, action, dialogue, and circumstance — never paper over it with a tired metaphor.
+
+3. Match the intensity of the description to the real intensity of the moment.
+Strong physiological reactions such as "指甲掐进掌心渗血", "咬破嘴唇", "掐进肉里" are not forbidden, but they belong only to genuinely extreme moments (great pain, the verge of collapse, life-or-death stakes). Do NOT use such extreme reactions to render what is essentially a minor feeling (mild nervousness, displeasure, concern, hesitation) — that is melodramatic over-exaggeration, both unrealistic and tiresome. Keep the intensity of your description proportional to the true intensity of the situation: render subtle feelings in restrained, specific, character-appropriate ways, and reserve strong physiological description for moments that have actually reached a critical point.
+
+Overall: use fewer big words and ready-made clichés; write more specific, restrained detail that fits the character and the present moment. Prefer plain and true over ornate and hollow.`
+
+func isTextFixEntry(entry *model.WorldBookEntry) bool {
+	return entry != nil && strings.TrimSpace(entry.Keys) == textFixEntryKey
+}
+
+// buildTextFixEntry：与状态栏对称的标准条目，constant=true 恒定注入，不依赖关键词。
+func buildTextFixEntry(worldBookID string) model.WorldBookEntry {
+	return model.WorldBookEntry{
+		WorldBookID:    worldBookID,
+		Keys:           textFixEntryKey,
+		SecondaryKeys:  "",
+		Content:        defaultTextFixInstruction,
+		Enabled:        true,
+		Constant:       true,
+		Priority:       0,
+		InjectionPos:   1,
+		InjectionDepth: 0,
+		ScanDepth:      0,
+		CaseSensitive:  false,
+		Order:          0,
+		Role:           "system",
+	}
+}
+
+// ===== 条目模板库（出厂预设，写死进程序；用户可在生成的条目上自行修改）=====
+
+// EntryTemplate 一个可供用户在“新建条目”时选择的标准模板。
+type entryTemplate struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Desc     string `json:"desc"`
+	Keys     string `json:"keys"`
+	Constant bool   `json:"constant"`
+	Content  string `json:"content"`
+}
+
+// entryTemplates：库里有几个就加载几个（前端动态渲染）。第一项是文字问题修正，
+// 其余为文风倾向占位模板，后续直接改这些字符串即可，前端无需改动。
+var entryTemplates = []entryTemplate{
+	{
+		Key:      "text_fix",
+		Label:    "AI 文字问题修正",
+		Desc:     "纠正套路化描写、烂俗比喻与生理夸张，全局恒定生效。",
+		Keys:     textFixEntryKey,
+		Constant: true,
+		Content:  defaultTextFixInstruction,
+	},
+	{
+		Key:      "style_cold",
+		Label:    "文风 · 冷峻克制",
+		Desc:     "（占位）冷峻、克制、留白的叙事倾向。",
+		Keys:     "文风·冷峻克制",
+		Constant: true,
+		Content:  "[占位模板] 冷峻克制文风的标准示例内容，后续设计时填充。",
+	},
+	{
+		Key:      "style_delicate",
+		Label:    "文风 · 细腻抒情",
+		Desc:     "（占位）细腻、感性、注重内心的叙事倾向。",
+		Keys:     "文风·细腻抒情",
+		Constant: true,
+		Content:  "[占位模板] 细腻抒情文风的标准示例内容，后续设计时填充。",
+	},
+	{
+		Key:      "style_concise",
+		Label:    "文风 · 简洁利落",
+		Desc:     "（占位）简洁、利落、节奏快的叙事倾向。",
+		Keys:     "文风·简洁利落",
+		Constant: true,
+		Content:  "[占位模板] 简洁利落文风的标准示例内容，后续设计时填充。",
+	},
+}
+
 func buildStatusBarEntry(worldBookID string) model.WorldBookEntry {
 	return model.WorldBookEntry{
 		WorldBookID:    worldBookID,
@@ -808,7 +900,21 @@ func (h *Handlers) CreateWorldBook(c *gin.Context) {
 			return
 		}
 	}
+	// 全局世界书（未绑角色）勾选「AI 文字问题修正」时，自动插入纠错条目。
+	if wb.EnableTextFix {
+		fixEntry := buildTextFixEntry(wb.ID)
+		if err := h.worldBookStore.CreateEntry(&fixEntry, userID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	c.JSON(http.StatusCreated, wb)
+}
+
+// ListEntryTemplates GET /api/worldbooks/entry-templates
+// 返回写死的出厂条目模板库（前端动态渲染，库里有几个画几个）。
+func (h *Handlers) ListEntryTemplates(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"templates": entryTemplates})
 }
 
 // UpdateWorldBook PUT /api/worldbooks/:id

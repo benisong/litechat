@@ -488,6 +488,11 @@ export const useWorldBookStore = create((set) => ({
     return data
   },
 
+  fetchEntryTemplates: async () => {
+    const data = await apiFetch('/worldbook-templates')
+    return (data && data.templates) || []
+  },
+
   fetchWorldBook: async (id) => {
     const data = await apiFetch(`/worldbooks/${id}`)
     set({ currentBook: data })

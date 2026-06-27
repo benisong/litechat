@@ -103,6 +103,7 @@ type WorldBook struct {
 	UpdatedAt     time.Time        `json:"updated_at" db:"updated_at"`
 	Entries       []WorldBookEntry `json:"entries,omitempty" db:"-"`
 	CharacterName string           `json:"character_name,omitempty" db:"-"`
+	EnableTextFix bool             `json:"enable_text_fix,omitempty" db:"-"`
 }
 
 // WorldBookEntry 世界书条目
