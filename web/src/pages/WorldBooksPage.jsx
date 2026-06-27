@@ -101,6 +101,8 @@ export default function WorldBooksPage() {
         keys: tpl.keys || '',
         content: tpl.content || '',
         constant: !!tpl.constant,
+        injection_position: tpl.injection_position ?? DEFAULT_ENTRY.injection_position,
+        injection_depth: tpl.injection_depth ?? DEFAULT_ENTRY.injection_depth,
       })
     }
     setEditEntry(null)

@@ -87,48 +87,114 @@ func buildTextFixEntry(worldBookID string) model.WorldBookEntry {
 
 // EntryTemplate 一个可供用户在“新建条目”时选择的标准模板。
 type entryTemplate struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Desc     string `json:"desc"`
-	Keys     string `json:"keys"`
-	Constant bool   `json:"constant"`
-	Content  string `json:"content"`
+	Key            string `json:"key"`
+	Label          string `json:"label"`
+	Desc           string `json:"desc"`
+	Keys           string `json:"keys"`
+	Constant       bool   `json:"constant"`
+	InjectionPos   int    `json:"injection_position"`
+	InjectionDepth int    `json:"injection_depth"`
+	Content        string `json:"content"`
 }
 
-// entryTemplates：库里有几个就加载几个（前端动态渲染）。第一项是文字问题修正，
-// 其余为文风倾向占位模板，后续直接改这些字符串即可，前端无需改动。
+// 文风模板共用：作为软引导注入到对话流偏上的位置（d4），不抢系统层注意力。
+// 文字问题修正则注入 d0（紧贴系统提示词，强约束）。
+const styleInjectionDepth = 4
+
+const styleMurakami = `[Writing Style · Haruki Murakami]
+From now on, write the narration and prose in the style of Haruki Murakami (村上春树). Keep this as a soft stylistic tendency, not a hard rule. Always write in Chinese.
+风格要点：
+- 疏离、克制、淡淡的孤独感，叙述者像隔着一层玻璃观察世界。
+- 大量平实的日常细节（音乐、食物、天气、做饭、跑步），在琐碎里渗出情绪。
+- 比喻奇特而精确，常把抽象情绪具象成不相干的事物。
+- 句子节奏舒缓，留白多，不急于解释，对话简短而有余味。
+- 不煽情、不堆砌华丽辞藻；情绪藏在事实底下，而不是直接喊出来。`
+
+const styleGuLong = `[Writing Style · Gu Long]
+From now on, write the narration and prose in the style of Gu Long (古龙) wuxia. Keep this as a soft stylistic tendency, not a hard rule. Always write in Chinese.
+风格要点：
+- 短句、断句，一句一行的节奏感，像刀光一闪。
+- 大量留白与悬念，重意境与气氛，轻具体招式描写。
+- 对白机锋，冷峻、简练、话里有话，常以反问和顿挫制造张力。
+- 善用意象（月、剑、酒、风、寂寞）渲染情绪与宿命感。
+- 不写流水账，重在“顿”和“势”，关键处戛然而止。`
+
+const styleFemaleWeb = `[Writing Style · 网文女频]
+From now on, write in the style of popular Chinese web fiction for female readers (女频). Keep this as a soft stylistic tendency, not a hard rule. Always write in Chinese.
+风格要点：情绪细腻、注重内心戏与感官细节，节奏明快带钩子，强调氛围感、心动瞬间与情感拉扯；对白有张力，常用细节体现人物地位与魅力。
+示例语句（学其腔调，不要照抄）：
+- 他骨节分明的手指扣住她的腕，力道不重，却让她半步也退不开。
+- “怕我？”他低低地笑，气息扫过她耳廓，“可你刚才，分明是想靠近我的。”
+- 满室宾客喧哗，她却只听得见自己心跳，一下，又一下，吵得厉害。
+- 他替她拢了拢披散的发，动作熟稔得像做过千百遍，眼底却没什么温度。
+- 她以为自己藏得很好，直到对上那双看透一切的眼睛。
+- 那一瞬间，所有的伪装都碎了，她在他面前，无所遁形。
+- 他向来不近人情，偏偏在她面前，破了一次又一次的例。`
+
+const styleMaleWeb = `[Writing Style · 网文男频]
+From now on, write in the style of popular Chinese web fiction for male readers (男频). Keep this as a soft stylistic tendency, not a hard rule. Always write in Chinese.
+风格要点：节奏爽利、信息密度高，重事件推进与实力/格局展现，对白干脆有气场，擅长制造反转、压迫感与“装逼打脸”的爽点；环境与气氛服务于冲突。
+示例语句（学其腔调，不要照抄）：
+- 他抬起头，淡淡地看了对方一眼：“就凭你们，也配？”
+- 全场死一般地寂静，没人敢相信，刚才那一掌，竟是他随手挥出的。
+- 三年前他被踩进泥里，三年后他归来，要让所有人仰望。
+- “记住我的名字。”他转身离去，留下满地不敢吭声的人。
+- 实力，从来不需要解释；拳头落下时，质疑自然就闭嘴了。
+- 对方脸色骤变——他这才意识到，眼前这个年轻人，深不可测。
+- 规矩是强者定的，而从今天起，这里我说了算。`
+
+// entryTemplates：库里有几个就加载几个（前端动态渲染）。第一项是文字问题修正（d0 强约束），
+// 其余为文风模板（d4 软引导）。这些只是出厂起点，用户可在生成的条目上自行修改。
 var entryTemplates = []entryTemplate{
 	{
-		Key:      "text_fix",
-		Label:    "AI 文字问题修正",
-		Desc:     "纠正套路化描写、烂俗比喻与生理夸张，全局恒定生效。",
-		Keys:     textFixEntryKey,
-		Constant: true,
-		Content:  defaultTextFixInstruction,
+		Key:            "text_fix",
+		Label:          "AI 文字问题修正",
+		Desc:           "纠正套路化描写、烂俗比喻与生理夸张，全局恒定生效（强约束）。",
+		Keys:           textFixEntryKey,
+		Constant:       true,
+		InjectionPos:   1,
+		InjectionDepth: 0,
+		Content:        defaultTextFixInstruction,
 	},
 	{
-		Key:      "style_cold",
-		Label:    "文风 · 冷峻克制",
-		Desc:     "（占位）冷峻、克制、留白的叙事倾向。",
-		Keys:     "文风·冷峻克制",
-		Constant: true,
-		Content:  "[占位模板] 冷峻克制文风的标准示例内容，后续设计时填充。",
+		Key:            "style_murakami",
+		Label:          "文风 · 村上春树",
+		Desc:           "疏离克制、日常细节里渗出孤独感的叙事腔调。",
+		Keys:           "文风·村上春树",
+		Constant:       true,
+		InjectionPos:   1,
+		InjectionDepth: styleInjectionDepth,
+		Content:        styleMurakami,
 	},
 	{
-		Key:      "style_delicate",
-		Label:    "文风 · 细腻抒情",
-		Desc:     "（占位）细腻、感性、注重内心的叙事倾向。",
-		Keys:     "文风·细腻抒情",
-		Constant: true,
-		Content:  "[占位模板] 细腻抒情文风的标准示例内容，后续设计时填充。",
+		Key:            "style_gulong",
+		Label:          "文风 · 古龙",
+		Desc:           "短句断句、留白机锋、意境与宿命感的武侠腔调。",
+		Keys:           "文风·古龙",
+		Constant:       true,
+		InjectionPos:   1,
+		InjectionDepth: styleInjectionDepth,
+		Content:        styleGuLong,
 	},
 	{
-		Key:      "style_concise",
-		Label:    "文风 · 简洁利落",
-		Desc:     "（占位）简洁、利落、节奏快的叙事倾向。",
-		Keys:     "文风·简洁利落",
-		Constant: true,
-		Content:  "[占位模板] 简洁利落文风的标准示例内容，后续设计时填充。",
+		Key:            "style_female_web",
+		Label:          "文风 · 网文女频",
+		Desc:           "细腻、心动、情感拉扯，带示例语句锚定腔调。",
+		Keys:           "文风·网文女频",
+		Constant:       true,
+		InjectionPos:   1,
+		InjectionDepth: styleInjectionDepth,
+		Content:        styleFemaleWeb,
+	},
+	{
+		Key:            "style_male_web",
+		Label:          "文风 · 网文男频",
+		Desc:           "爽利、格局、装逼打脸，带示例语句锚定腔调。",
+		Keys:           "文风·网文男频",
+		Constant:       true,
+		InjectionPos:   1,
+		InjectionDepth: styleInjectionDepth,
+		Content:        styleMaleWeb,
 	},
 }
 
