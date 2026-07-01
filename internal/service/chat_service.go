@@ -1128,7 +1128,20 @@ func (s *ChatService) injectWorldBookEntries(messages []model.ChatCompletionMess
 		result = append(result[:pos], append([]model.ChatCompletionMessage{inj.msg}, result[pos:]...)...)
 	}
 
-	return result
+	// 注入可能在开头 system 块后再插入 role=system 的条目(如文字问题修正/文风模板)，
+	// 形成【连续两条 system】。多数 OpenAI 兼容中转只认第一条 system，后续 system 会被
+	// 丢弃 —— 导致这些注入指令实际不生效。这里在注入后再做一次「合并相邻同 role」，把相邻
+	// 的 system 合并成一条(等同 buildMessages 的 Step E，但覆盖注入后的最终列表)。
+	var merged []model.ChatCompletionMessage
+	for _, msg := range result {
+		if len(merged) > 0 && merged[len(merged)-1].Role == msg.Role {
+			merged[len(merged)-1].Content += "\n\n" + msg.Content
+		} else {
+			merged = append(merged, msg)
+		}
+	}
+
+	return merged
 }
 
 // matchWorldBookEntry 判断某条世界书条目是否被聊天历史命中（主关键词命中 + 可选次关键词 AND 条件）。

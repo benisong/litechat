@@ -600,7 +600,7 @@ export default function WorldBooksPage() {
             <label className="block text-xs text-gray-400 mb-2">类型</label>
             <div className="flex gap-3">
               <button
-                onClick={() => setNewBookForm(f => ({ ...f, character_id: '', name: '' }))}
+                onClick={() => setNewBookForm(f => ({ ...f, character_id: '', name: '', enable_text_fix: true }))}
                 className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',
                   !newBookForm.character_id
                     ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
@@ -616,6 +616,7 @@ export default function WorldBooksPage() {
                     ...f,
                     character_id: firstChar?.id || '',
                     name: firstChar ? `${firstChar.name} 🌍` : '',
+                    enable_text_fix: false,
                   }))
                 }}
                 className={clsx('flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all',

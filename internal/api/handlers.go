@@ -966,8 +966,8 @@ func (h *Handlers) CreateWorldBook(c *gin.Context) {
 			return
 		}
 	}
-	// 全局世界书（未绑角色）勾选「AI 文字问题修正」时，自动插入纠错条目。
-	if wb.EnableTextFix {
+	// 仅【全局世界书】（未绑角色）勾选「AI 文字问题修正」时，自动插入纠错条目。
+	if wb.EnableTextFix && strings.TrimSpace(wb.CharacterID) == "" {
 		fixEntry := buildTextFixEntry(wb.ID)
 		if err := h.worldBookStore.CreateEntry(&fixEntry, userID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
