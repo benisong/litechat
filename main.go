@@ -51,7 +51,6 @@ func main() {
 	}
 
 	summaryService := service.NewSummaryService(messageStore, summaryStore, configStore, userStore)
-	summaryService.Start()
 	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore, summaryService)
 
 	handlers := api.NewHandlers(

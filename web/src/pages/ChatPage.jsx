@@ -184,6 +184,7 @@ export default function ChatPage() {
       await sendMessage(chatId, content)
     } catch (err) {
       showToast(err.message || '发送失败', 'error')
+      throw err
     }
   }
 

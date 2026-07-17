@@ -23,7 +23,8 @@ func NewDB(dataDir string) (*DB, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "litechat.db")
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	// WAL keeps reads available during short writes; busy_timeout absorbs brief writer contention.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
@@ -166,23 +167,6 @@ func (db *DB) InitSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_summary_chunks_chat_status ON chat_summary_chunks(chat_id, status, level, from_seq);
-
-	CREATE TABLE IF NOT EXISTS chat_summary_jobs (
-		id               TEXT PRIMARY KEY,
-		chat_id          TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-		job_type         TEXT NOT NULL,
-		from_seq         INTEGER NOT NULL,
-		to_seq           INTEGER NOT NULL,
-		base_cutoff_seq  INTEGER DEFAULT 0,
-		status           TEXT NOT NULL DEFAULT 'pending',
-		attempt_count    INTEGER DEFAULT 0,
-		next_run_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-		last_error       TEXT DEFAULT '',
-		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_summary_jobs_status_runat ON chat_summary_jobs(status, next_run_at, created_at);
 
 	-- 配置表
 	CREATE TABLE IF NOT EXISTS configs (

@@ -331,10 +331,14 @@ export const useChatStore = create((set, get) => ({
         : []
       set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
+      const summaryFailed = String(err?.message || '').includes('消息摘要返回错误')
       set(s => ({
-        messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id),
+        messages: s.messages.filter(m => (
+          m.id !== aiMsgPlaceholder.id && (!summaryFailed || m.id !== userMsg.id)
+        )),
         streaming: false,
       }))
+      if (summaryFailed) err.canResend = true
       throw err
     }
   },

@@ -2,8 +2,6 @@ package service
 
 import (
 	"bytes"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,9 +17,7 @@ const (
 	summarySmallThreshold = 3000
 	summaryRawOverlap     = 12
 	summaryMaxRawChars    = 12000
-	summaryMergeCount     = 5
 	summarySmallMaxTokens = 2000
-	summaryBigMaxTokens   = 3200
 )
 
 const defaultMemoryPromptSuffix = `- 必须保留会影响后续回复的稳定事实：人物、地点、物品、组织、时间线、约定、偏好、禁忌、称呼、任务状态。
@@ -65,7 +61,18 @@ type SummaryService struct {
 	summaryStore *store.SummaryStore
 	configStore  *store.ConfigStore
 	userStore    *store.UserStore
-	wakeCh       chan struct{}
+}
+
+// summaryPlan 是一次同步摘要闸门的只读快照。模型调用期间不持有数据库事务。
+type summaryPlan struct {
+	chatID            string
+	baseCutoffSeq     int
+	expectedLatestSeq int
+	expectedLatestID  string
+	toSeq             int
+	activeBig         *model.ChatSummaryChunk
+	activeSmalls      []*model.ChatSummaryChunk
+	rawMessages       []*model.Message
 }
 
 func NewSummaryService(
@@ -79,46 +86,12 @@ func NewSummaryService(
 		summaryStore: summaryStore,
 		configStore:  configStore,
 		userStore:    userStore,
-		wakeCh:       make(chan struct{}, 1),
 	}
-}
-
-func (s *SummaryService) Start() {
-	go func() {
-		s.bootstrap()
-		s.workerLoop()
-	}()
-}
-
-func (s *SummaryService) bootstrap() {
-	if err := s.summaryStore.RequeueInterruptedJobs(); err != nil {
-		log.Printf("[summary] 恢复中断任务失败: %v", err)
-	}
-	if !s.isEnabled() {
-		return
-	}
-
-	chatIDs, err := s.messageStore.ListChatIDs()
-	if err != nil {
-		log.Printf("[summary] 扫描已有会话失败: %v", err)
-		return
-	}
-	for _, chatID := range chatIDs {
-		if err := s.scheduleSmallIfNeeded(chatID, false); err != nil {
-			log.Printf("[summary] 启动修复失败 chat=%s: %v", chatID, err)
-		}
-	}
-	s.wake()
 }
 
 func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model.Message) (string, []*model.Message) {
 	if !s.isEnabled() {
 		return "", history
-	}
-	if err := s.scheduleSmallIfNeeded(chatID, false); err != nil {
-		log.Printf("[summary] 请求前检查失败 chat=%s: %v", chatID, err)
-	} else {
-		s.wake()
 	}
 
 	state, err := s.reconcileSummaryState(chatID)
@@ -164,6 +137,133 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 		chatID, state.AppliedCutoffSeq, coverageTo, len(history), len(filtered))
 
 	return strings.Join(summaryBlocks, "\n\n"), filtered
+}
+
+// PlanSummaryForNextReply 检查上一轮已落库历史是否达到摘要阈值。
+// 它只读取和修复摘要游标，不请求模型，也不会保存本轮用户消息。
+func (s *SummaryService) PlanSummaryForNextReply(chatID string, history []*model.Message) (*summaryPlan, error) {
+	if !s.isEnabled() {
+		return nil, nil
+	}
+
+	state, err := s.reconcileSummaryState(chatID)
+	if err != nil {
+		return nil, err
+	}
+	activeBig, activeSmalls, coverageTo, err := s.resolveUsableSummaryCoverage(chatID, state.AppliedCutoffSeq)
+	if err != nil {
+		return nil, err
+	}
+
+	unsummarized := make([]*model.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.Seq > coverageTo {
+			unsummarized = append(unsummarized, msg)
+		}
+	}
+	if countEffectiveChars(unsummarized) < summarySmallThreshold {
+		return nil, nil
+	}
+
+	toSeq := selectSmallSummaryEnd(unsummarized, false)
+	if toSeq <= coverageTo {
+		return nil, nil
+	}
+	target := make([]*model.Message, 0, len(unsummarized))
+	for _, msg := range unsummarized {
+		if msg.Seq > toSeq {
+			break
+		}
+		target = append(target, msg)
+	}
+	if len(target) == 0 {
+		return nil, nil
+	}
+
+	latestSeq, err := s.messageStore.LatestSeq(chatID)
+	if err != nil {
+		return nil, err
+	}
+	if len(history) == 0 || history[len(history)-1].Seq != latestSeq || history[len(history)-1].ID == "" {
+		return nil, store.ErrSummaryStateChanged
+	}
+	return &summaryPlan{
+		chatID:            chatID,
+		baseCutoffSeq:     coverageTo,
+		expectedLatestSeq: latestSeq,
+		expectedLatestID:  history[len(history)-1].ID,
+		toSeq:             toSeq,
+		activeBig:         activeBig,
+		activeSmalls:      activeSmalls,
+		rawMessages:       target,
+	}, nil
+}
+
+// GeneratePlannedSummary 在生成本轮聊天回复前先生成摘要。此阶段没有数据库事务。
+func (s *SummaryService) GeneratePlannedSummary(plan *summaryPlan) (string, error) {
+	if plan == nil {
+		return "", fmt.Errorf("摘要计划为空")
+	}
+	settings, err := s.configStore.GetSettings()
+	if err != nil {
+		return "", err
+	}
+	if settings.ServiceMode != "service" {
+		return "", fmt.Errorf("当前不在 service 模式")
+	}
+
+	prompt := buildRollingSummaryPrompt(plan.activeBig, plan.activeSmalls, plan.rawMessages, settings.MemoryPromptSuffix)
+	rawSummary, err := s.callSummaryCompletion(settings, prompt, summarySmallMaxTokens)
+	if err != nil {
+		return "", err
+	}
+	return parseSummaryChunk(rawSummary)
+}
+
+// BuildContextAfterPlannedSummary 在摘要尚未落库时，构造本轮聊天请求使用的临时压缩上下文。
+func (s *SummaryService) BuildContextAfterPlannedSummary(
+	plan *summaryPlan,
+	summaryContent string,
+	history []*model.Message,
+) (string, []*model.Message, error) {
+	if plan == nil || strings.TrimSpace(summaryContent) == "" {
+		return "", nil, fmt.Errorf("摘要计划或摘要内容为空")
+	}
+
+	rawStartSeq := plan.toSeq - summaryRawOverlap + 1
+	if rawStartSeq < 1 {
+		rawStartSeq = 1
+	}
+	recent := make([]*model.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.Seq >= rawStartSeq {
+			recent = append(recent, msg)
+		}
+	}
+	recent = trimHistoryByEffectiveChars(recent, summaryMaxRawChars)
+	return renderSummaryChunkForContext("会话滚动摘要", summaryContent), recent, nil
+}
+
+// CommitSummaryAndExchange 在模型调用全部结束后，用一个短事务原子写入摘要和本轮对话。
+func (s *SummaryService) CommitSummaryAndExchange(plan *summaryPlan, summaryContent, userContent, assistantContent string) error {
+	if plan == nil {
+		return fmt.Errorf("摘要计划为空")
+	}
+	if err := s.summaryStore.CommitRollingSummaryAndExchange(
+		plan.chatID,
+		plan.baseCutoffSeq,
+		plan.expectedLatestSeq,
+		plan.expectedLatestID,
+		plan.toSeq,
+		summaryContent,
+		userContent,
+		assistantContent,
+	); err != nil {
+		return err
+	}
+	log.Printf("[summary] 摘要闸门已提交 chat=%s summary=%d-%d exchange=%d-%d",
+		plan.chatID, 1, plan.toSeq, plan.expectedLatestSeq+1, plan.expectedLatestSeq+2)
+	return nil
 }
 
 func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq int) (*model.ChatSummaryChunk, []*model.ChatSummaryChunk, int, error) {
@@ -230,10 +330,6 @@ func (s *SummaryService) reconcileSummaryState(chatID string) (*model.ChatSummar
 	}
 
 	repairFrom := coverageTo + 1
-	reason := fmt.Sprintf("summary coverage repaired from cutoff %d to %d", state.AppliedCutoffSeq, coverageTo)
-	if err := s.summaryStore.MarkOpenJobsStale(chatID, reason); err != nil {
-		return nil, err
-	}
 	if err := s.summaryStore.MarkChunksDirtyFromSeq(chatID, repairFrom); err != nil {
 		return nil, err
 	}
@@ -247,17 +343,6 @@ func (s *SummaryService) reconcileSummaryState(chatID string) (*model.ChatSummar
 	log.Printf("[summary] 已修复摘要断层 chat=%s old_cutoff=%d coverage=%d rebuild_from=%d",
 		chatID, state.AppliedCutoffSeq, coverageTo, repairFrom)
 	return s.summaryStore.GetState(chatID)
-}
-
-func (s *SummaryService) OnAssistantMessageStored(chatID string) {
-	if !s.isEnabled() {
-		return
-	}
-	if err := s.scheduleSmallIfNeeded(chatID, false); err != nil {
-		log.Printf("[摘要] 调度小摘要失败 chat=%s: %v", chatID, err)
-		return
-	}
-	s.wake()
 }
 
 func (s *SummaryService) InvalidateFromSeq(chatID string, fromSeq int) {
@@ -296,341 +381,7 @@ func (s *SummaryService) InvalidateFromSeq(chatID string, fromSeq int) {
 
 	if err := s.summaryStore.RollbackCutoff(chatID, newCutoff, fromSeq); err != nil {
 		log.Printf("[摘要] 回退 cutoff 失败 chat=%s: %v", chatID, err)
-		return
 	}
-	if err := s.scheduleSmallIfNeeded(chatID, forceRebuild); err != nil {
-		log.Printf("[摘要] 失效后重新调度失败 chat=%s: %v", chatID, err)
-	}
-	s.wake()
-}
-
-func (s *SummaryService) scheduleSmallIfNeeded(chatID string, force bool) error {
-	state, err := s.reconcileSummaryState(chatID)
-	if err != nil {
-		return err
-	}
-
-	latestSeq, err := s.messageStore.LatestSeq(chatID)
-	if err != nil {
-		return err
-	}
-	if latestSeq <= state.AppliedCutoffSeq {
-		return s.scheduleBigIfNeeded(chatID)
-	}
-
-	messages, err := s.messageStore.ListByChatIDRange(chatID, state.AppliedCutoffSeq+1, latestSeq)
-	if err != nil {
-		return err
-	}
-	if len(messages) == 0 {
-		return s.scheduleBigIfNeeded(chatID)
-	}
-	if !force && countEffectiveChars(messages) < summarySmallThreshold {
-		return s.scheduleBigIfNeeded(chatID)
-	}
-	toSeq := selectSmallSummaryEnd(messages, force)
-	if toSeq <= 0 {
-		return s.scheduleBigIfNeeded(chatID)
-	}
-
-	if err := s.summaryStore.ScheduleSmallJob(chatID, state.AppliedCutoffSeq+1, toSeq, state.AppliedCutoffSeq); err != nil {
-		return err
-	}
-	log.Printf("[summary] 已调度小摘要 chat=%s range=%d-%d latest=%d",
-		chatID, state.AppliedCutoffSeq+1, toSeq, latestSeq)
-	return s.scheduleBigIfNeeded(chatID)
-}
-
-func (s *SummaryService) scheduleBigIfNeeded(chatID string) error {
-	activeBig, err := s.summaryStore.GetActiveBigChunk(chatID)
-	if err != nil {
-		return err
-	}
-	smalls, err := s.summaryStore.ListActiveSmallChunks(chatID)
-	if err != nil {
-		return err
-	}
-	targetSmalls := selectMergeableSmallChunks(activeBig, smalls, summaryMergeCount)
-	if len(targetSmalls) < summaryMergeCount {
-		return nil
-	}
-
-	return s.summaryStore.ScheduleBigJob(chatID, targetSmalls[0].FromSeq, targetSmalls[len(targetSmalls)-1].ToSeq, 0)
-}
-
-func (s *SummaryService) workerLoop() {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-		case <-s.wakeCh:
-		}
-
-		for {
-			processed, err := s.processNextJob()
-			if err != nil {
-				log.Printf("[摘要] worker 执行失败: %v", err)
-				break
-			}
-			if !processed {
-				break
-			}
-		}
-	}
-}
-
-func (s *SummaryService) processNextJob() (bool, error) {
-	if !s.isEnabled() {
-		return false, nil
-	}
-
-	job, err := s.summaryStore.ClaimNextJob()
-	if err != nil {
-		return false, err
-	}
-	if job == nil {
-		return false, nil
-	}
-
-	var runErr error
-	switch job.JobType {
-	case "small":
-		runErr = s.runSmallJob(job)
-	case "big":
-		runErr = s.runBigJob(job)
-	default:
-		runErr = fmt.Errorf("未知摘要任务类型: %s", job.JobType)
-	}
-
-	if runErr == nil {
-		if err := s.summaryStore.CompleteJob(job.ID); err != nil {
-			return true, err
-		}
-		switch job.JobType {
-		case "small":
-			if err := s.scheduleSmallIfNeeded(job.ChatID, false); err != nil {
-				return true, err
-			}
-		case "big":
-			if err := s.scheduleBigIfNeeded(job.ChatID); err != nil {
-				return true, err
-			}
-		}
-		s.wake()
-		return true, nil
-	}
-
-	if strings.HasPrefix(runErr.Error(), "stale:") {
-		if err := s.summaryStore.MarkJobStale(job.ID, runErr.Error()); err != nil {
-			return true, err
-		}
-		if job.JobType == "small" {
-			if err := s.scheduleSmallIfNeeded(job.ChatID, false); err != nil {
-				return true, err
-			}
-		} else if err := s.scheduleBigIfNeeded(job.ChatID); err != nil {
-			return true, err
-		}
-		s.wake()
-		return true, nil
-	}
-
-	attempt := job.AttemptCount + 1
-	nextRunAt := time.Now().Add(nextRetryDelay(attempt))
-	if err := s.summaryStore.FailJob(job.ID, attempt, nextRunAt, runErr.Error()); err != nil {
-		return true, err
-	}
-	log.Printf("[summary] 摘要任务失败，将保持原连续区间重试 job=%s chat=%s type=%s range=%d-%d attempt=%d next=%s err=%v",
-		job.ID, job.ChatID, job.JobType, job.FromSeq, job.ToSeq, attempt, nextRunAt.Format(time.RFC3339), runErr)
-	return true, nil
-}
-
-func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
-	state, err := s.summaryStore.GetState(job.ChatID)
-	if err != nil {
-		return err
-	}
-	if state.AppliedCutoffSeq != job.BaseCutoffSeq || job.FromSeq != state.AppliedCutoffSeq+1 {
-		return fmt.Errorf("stale: job does not continue current cutoff")
-	}
-	if state.DirtyFromSeq > 0 && state.DirtyFromSeq != job.FromSeq && state.DirtyFromSeq <= job.ToSeq {
-		return fmt.Errorf("stale: job range invalidated by newer change")
-	}
-
-	settings, err := s.configStore.GetSettings()
-	if err != nil {
-		return err
-	}
-	if settings.ServiceMode != "service" {
-		return fmt.Errorf("stale: summary disabled outside service mode")
-	}
-
-	rawMessages, err := s.messageStore.ListByChatIDRange(job.ChatID, job.FromSeq, job.ToSeq)
-	if err != nil {
-		return err
-	}
-	if len(rawMessages) == 0 {
-		return fmt.Errorf("stale: no messages in target range")
-	}
-
-	activeBig, precedingSmalls, _, err := s.resolveUsableSummaryCoverage(job.ChatID, job.FromSeq-1)
-	if err != nil {
-		return err
-	}
-	sourceFingerprint := summarySourceFingerprint(activeBig, precedingSmalls, rawMessages)
-
-	prompt := buildSmallSummaryPrompt(activeBig, precedingSmalls, rawMessages, settings.MemoryPromptSuffix)
-	rawSummary, err := s.callSummaryCompletion(settings, prompt, summarySmallMaxTokens)
-	if err != nil {
-		return err
-	}
-
-	normalized, err := parseSummaryChunk(rawSummary)
-	if err != nil {
-		return err
-	}
-
-	state, err = s.summaryStore.GetState(job.ChatID)
-	if err != nil {
-		return err
-	}
-	if state.AppliedCutoffSeq != job.BaseCutoffSeq || job.FromSeq != state.AppliedCutoffSeq+1 {
-		return fmt.Errorf("stale: cutoff changed during generation")
-	}
-
-	currentRawMessages, err := s.messageStore.ListByChatIDRange(job.ChatID, job.FromSeq, job.ToSeq)
-	if err != nil {
-		return err
-	}
-	currentActiveBig, currentPrecedingSmalls, _, err := s.resolveUsableSummaryCoverage(job.ChatID, job.FromSeq-1)
-	if err != nil {
-		return err
-	}
-	if summarySourceFingerprint(currentActiveBig, currentPrecedingSmalls, currentRawMessages) != sourceFingerprint {
-		return fmt.Errorf("stale: summary sources changed during generation")
-	}
-	running, err := s.summaryStore.IsJobRunning(job.ID)
-	if err != nil {
-		return err
-	}
-	if !running {
-		return fmt.Errorf("stale: job was cancelled during generation")
-	}
-
-	chunk := &model.ChatSummaryChunk{
-		ChatID:  job.ChatID,
-		Level:   "small",
-		FromSeq: job.FromSeq,
-		ToSeq:   job.ToSeq,
-		Content: normalized,
-		Status:  "active",
-	}
-	if err := s.summaryStore.CreateChunk(chunk); err != nil {
-		return err
-	}
-	if err := s.summaryStore.ApplySmallSummary(job.ChatID, job.ToSeq); err != nil {
-		return err
-	}
-	log.Printf("[summary] 小摘要已应用 chat=%s range=%d-%d", job.ChatID, job.FromSeq, job.ToSeq)
-	return nil
-}
-
-func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
-	settings, err := s.configStore.GetSettings()
-	if err != nil {
-		return err
-	}
-	if settings.ServiceMode != "service" {
-		return fmt.Errorf("stale: summary disabled outside service mode")
-	}
-
-	activeBig, _ := s.summaryStore.GetActiveBigChunk(job.ChatID)
-	activeSmalls, err := s.summaryStore.ListActiveSmallChunks(job.ChatID)
-	if err != nil {
-		return err
-	}
-	targetSmalls := selectMergeableSmallChunks(activeBig, activeSmalls, summaryMergeCount)
-	if len(targetSmalls) < summaryMergeCount {
-		return fmt.Errorf("stale: active small summaries are not enough")
-	}
-
-	coverageTo := targetSmalls[len(targetSmalls)-1].ToSeq
-	state, err := s.summaryStore.GetState(job.ChatID)
-	if err != nil {
-		return err
-	}
-	if state.DirtyFromSeq > 0 && state.DirtyFromSeq <= coverageTo {
-		return fmt.Errorf("stale: summary range was invalidated before merge")
-	}
-	sourceFingerprint := summarySourceFingerprint(activeBig, targetSmalls, nil)
-	prompt := buildBigSummaryPrompt(activeBig, targetSmalls, settings.MemoryPromptSuffix)
-	rawSummary, err := s.callSummaryCompletion(settings, prompt, summaryBigMaxTokens)
-	if err != nil {
-		return err
-	}
-
-	normalized, err := parseSummaryChunk(rawSummary)
-	if err != nil {
-		return err
-	}
-
-	state, err = s.summaryStore.GetState(job.ChatID)
-	if err != nil {
-		return err
-	}
-	if state.DirtyFromSeq > 0 && state.DirtyFromSeq <= coverageTo {
-		return fmt.Errorf("stale: summary range changed during merge")
-	}
-	currentActiveBig, _ := s.summaryStore.GetActiveBigChunk(job.ChatID)
-	currentActiveSmalls, err := s.summaryStore.ListActiveSmallChunks(job.ChatID)
-	if err != nil {
-		return err
-	}
-	currentTargetSmalls := selectMergeableSmallChunks(currentActiveBig, currentActiveSmalls, summaryMergeCount)
-	if len(currentTargetSmalls) < summaryMergeCount {
-		return fmt.Errorf("stale: active small summaries changed during merge")
-	}
-	if summarySourceFingerprint(currentActiveBig, currentTargetSmalls, nil) != sourceFingerprint {
-		return fmt.Errorf("stale: merge sources changed during generation")
-	}
-	running, err := s.summaryStore.IsJobRunning(job.ID)
-	if err != nil {
-		return err
-	}
-	if !running {
-		return fmt.Errorf("stale: merge job was cancelled during generation")
-	}
-
-	if activeBig != nil {
-		if err := s.summaryStore.SupersedeBigChunk(job.ChatID); err != nil {
-			return err
-		}
-	}
-	bigChunk := &model.ChatSummaryChunk{
-		ChatID:  job.ChatID,
-		Level:   "big",
-		FromSeq: firstSeq(activeBig, targetSmalls),
-		ToSeq:   targetSmalls[len(targetSmalls)-1].ToSeq,
-		Content: normalized,
-		Status:  "active",
-	}
-	if err := s.summaryStore.CreateChunk(bigChunk); err != nil {
-		return err
-	}
-	smallIDs := make([]string, 0, len(targetSmalls))
-	for _, chunk := range targetSmalls {
-		smallIDs = append(smallIDs, chunk.ID)
-	}
-	if err := s.summaryStore.MarkSmallChunksMerged(smallIDs, bigChunk.ID); err != nil {
-		return err
-	}
-	if err := s.summaryStore.SetCurrentBigSummary(job.ChatID, bigChunk.ID); err != nil {
-		return err
-	}
-	log.Printf("[summary] 大摘要已合并 chat=%s range=%d-%d", job.ChatID, bigChunk.FromSeq, bigChunk.ToSeq)
-	return nil
 }
 
 func (s *SummaryService) callSummaryCompletion(settings *model.AppSettings, prompt string, maxTokens int) (string, error) {
@@ -707,78 +458,36 @@ func (s *SummaryService) isEnabled() bool {
 	return s.userStore.GetCurrentMode() == "service"
 }
 
-func (s *SummaryService) wake() {
-	select {
-	case s.wakeCh <- struct{}{}:
-	default:
-	}
-}
-
-func buildSmallSummaryPrompt(
+func buildRollingSummaryPrompt(
 	activeBig *model.ChatSummaryChunk,
 	activeSmalls []*model.ChatSummaryChunk,
 	rawMessages []*model.Message,
 	suffix string,
 ) string {
 	var builder strings.Builder
-	builder.WriteString("任务类型：小摘要。\n")
-	builder.WriteString("请结合已有摘要状态，为新的会话片段生成一条新的结构化小摘要。\n\n")
+	builder.WriteString("任务类型：滚动总摘要。\n")
+	builder.WriteString("请把已有记忆与新增会话合并成一份完整、去重、可独立使用的结构化摘要。输出必须覆盖已有记忆中的有效事实，不能只总结新增片段。\n\n")
 
-	if activeBig != nil {
-		builder.WriteString("[当前大摘要]\n")
-		builder.WriteString(activeBig.Content)
-		builder.WriteString("\n\n")
-	}
-
-	if len(activeSmalls) > 0 {
-		builder.WriteString("[当前未合并小摘要]\n")
-		for i, chunk := range activeSmalls {
-			builder.WriteString(fmt.Sprintf("第%d条小摘要（覆盖 %d-%d）\n", i+1, chunk.FromSeq, chunk.ToSeq))
+	if activeBig != nil || len(activeSmalls) > 0 {
+		builder.WriteString("[已有记忆]\n")
+		if activeBig != nil {
+			builder.WriteString(activeBig.Content)
+			builder.WriteString("\n")
+		}
+		for _, chunk := range activeSmalls {
 			builder.WriteString(chunk.Content)
 			builder.WriteString("\n")
 		}
 		builder.WriteString("\n")
 	}
 
-	builder.WriteString("[本次需要整理的新消息]\n")
+	builder.WriteString("[新增会话]\n")
 	builder.WriteString(renderMessagesForSummary(rawMessages))
-	builder.WriteString("\n")
-
-	builder.WriteString("额外要求：\n")
-	builder.WriteString("- 保持和已有摘要状态一致，不要改写已经确定的事实。\n")
-	builder.WriteString("- 重点压缩重复寒暄和无信息密度的往返，但不要遗漏关键转折。\n")
+	builder.WriteString("\n\n合并要求：\n")
+	builder.WriteString("- 删除已经被后续对话推翻或替代的旧状态，保留仍然有效的事实。\n")
+	builder.WriteString("- 合并重复信息，不要因压缩而丢失人物关系、用户偏好、承诺、物品、位置和未完成事项。\n")
+	builder.WriteString("- 只依据给定内容，不补写未发生的情节。\n")
 	appendMemoryPromptSuffix(&builder, suffix)
-
-	return builder.String()
-}
-
-func buildBigSummaryPrompt(
-	activeBig *model.ChatSummaryChunk,
-	targetSmalls []*model.ChatSummaryChunk,
-	suffix string,
-) string {
-	var builder strings.Builder
-	builder.WriteString("任务类型：大摘要。\n")
-	builder.WriteString("请将已有大摘要与下面 5 条连续小摘要合并成一条新的大摘要，去重并保留仍然有效的信息。\n\n")
-
-	if activeBig != nil {
-		builder.WriteString("[已有大摘要]\n")
-		builder.WriteString(activeBig.Content)
-		builder.WriteString("\n\n")
-	}
-
-	builder.WriteString("[待合并的小摘要]\n")
-	for i, chunk := range targetSmalls {
-		builder.WriteString(fmt.Sprintf("第%d条小摘要（覆盖 %d-%d）\n", i+1, chunk.FromSeq, chunk.ToSeq))
-		builder.WriteString(chunk.Content)
-		builder.WriteString("\n")
-	}
-	builder.WriteString("\n额外要求：\n")
-	builder.WriteString("- 合并时要去重、压缩重复表述，但保留剧情推进和关系变化。\n")
-	builder.WriteString("- open_loops 只保留仍未解决、仍需要下次接住的事项。\n")
-	builder.WriteString("- 合并时不得丢弃仍有效的旧事实、用户偏好、承诺、关系状态和世界状态。\n")
-	appendMemoryPromptSuffix(&builder, suffix)
-
 	return builder.String()
 }
 
@@ -942,76 +651,4 @@ func trimHistoryByEffectiveChars(history []*model.Message, maxChars int) []*mode
 		}
 	}
 	return history[start:]
-}
-
-func selectMergeableSmallChunks(bigChunk *model.ChatSummaryChunk, chunks []*model.ChatSummaryChunk, limit int) []*model.ChatSummaryChunk {
-	if limit <= 0 {
-		return nil
-	}
-	coverageTo := 0
-	if bigChunk != nil {
-		if bigChunk.FromSeq > 1 {
-			return nil
-		}
-		coverageTo = bigChunk.ToSeq
-	}
-
-	selected := make([]*model.ChatSummaryChunk, 0, limit)
-	for _, chunk := range chunks {
-		if chunk.ToSeq <= coverageTo {
-			continue
-		}
-		if coverageTo == 0 {
-			if chunk.FromSeq > 1 {
-				break
-			}
-		} else if chunk.FromSeq > coverageTo+1 {
-			break
-		}
-		selected = append(selected, chunk)
-		coverageTo = chunk.ToSeq
-		if len(selected) == limit {
-			break
-		}
-	}
-	return selected
-}
-
-func nextRetryDelay(attempt int) time.Duration {
-	switch attempt {
-	case 1:
-		return time.Minute
-	case 2:
-		return 5 * time.Minute
-	default:
-		return 30 * time.Minute
-	}
-}
-
-func firstSeq(activeBig *model.ChatSummaryChunk, chunks []*model.ChatSummaryChunk) int {
-	if activeBig != nil && activeBig.FromSeq > 0 {
-		return activeBig.FromSeq
-	}
-	if len(chunks) == 0 {
-		return 0
-	}
-	return chunks[0].FromSeq
-}
-
-func summarySourceFingerprint(bigChunk *model.ChatSummaryChunk, smallChunks []*model.ChatSummaryChunk, messages []*model.Message) string {
-	hasher := sha1.New()
-	writeChunk := func(prefix string, chunk *model.ChatSummaryChunk) {
-		if chunk == nil {
-			return
-		}
-		_, _ = hasher.Write([]byte(fmt.Sprintf("%s|%s|%d|%d|%s\n", prefix, chunk.ID, chunk.FromSeq, chunk.ToSeq, chunk.Content)))
-	}
-	for _, chunk := range smallChunks {
-		writeChunk("small", chunk)
-	}
-	writeChunk("big", bigChunk)
-	for _, msg := range messages {
-		_, _ = hasher.Write([]byte(fmt.Sprintf("msg|%s|%d|%s|%s\n", msg.ID, msg.Seq, msg.Role, msg.Content)))
-	}
-	return hex.EncodeToString(hasher.Sum(nil))
 }

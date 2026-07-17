@@ -21,15 +21,19 @@ export default function ChatInput({ onSend, disabled }) {
     ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
   }, [text])
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const content = text.trim()
     if (!content || disabled) return
-    onSend(content)
     setText('')
     setActiveTool('colon')
     // 重置高度
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
+    }
+    try {
+      await onSend(content)
+    } catch (err) {
+      if (err?.canResend) setText(content)
     }
   }
 
@@ -37,7 +41,7 @@ export default function ChatInput({ onSend, disabled }) {
     // Enter 发送，Shift+Enter 换行
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 

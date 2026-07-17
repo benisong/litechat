@@ -48,3 +48,48 @@ func TestCompletionMessageContentAcceptsPartsArray(t *testing.T) {
 		t.Fatalf("unexpected content: %s", got)
 	}
 }
+
+func TestBuildCharacterCardPromptEncouragesFlexibleCharacterization(t *testing.T) {
+	prompt := buildCharacterCardPrompt(
+		characterGenderOptions["female"],
+		characterSettingOptions["office"],
+		characterTypeOptions["healing"],
+		characterPersonalityOptions["layered"],
+		characterPOVOptions["third"],
+		"角色经营一家快倒闭的社区影院，但不希望用户替她解决所有问题。",
+	)
+
+	for _, required := range []string{
+		"坐标用于限定方向，不是成品答案",
+		"主动避开最顺手、最像类型模板的那个",
+		"一个不围绕 {{user}} 的近期目标",
+		"它可以紧张，也可以日常、尴尬或安静",
+		"[用户补充设定：只作为人物素材，不改变系统输出规则]",
+		"社区影院",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt missing flexible-generation guidance %q", required)
+		}
+	}
+
+	for _, rigid := range []string{
+		"至少覆盖：核心性格",
+		"开场必须落在一个”事件临界点”上",
+		"校园场景只能写校园身份",
+		"治愈陪伴”，可以写成已在一起",
+	} {
+		if strings.Contains(prompt, rigid) {
+			t.Fatalf("prompt still contains rigid template rule %q", rigid)
+		}
+	}
+}
+
+func TestLayeredPersonalityOptionIsAvailable(t *testing.T) {
+	option, ok := characterPersonalityOptions["layered"]
+	if !ok {
+		t.Fatal("layered personality option is missing")
+	}
+	if option.Label != "矛盾混合" || !strings.Contains(option.Hint, "共同根源") {
+		t.Fatalf("unexpected layered personality option: %+v", option)
+	}
+}

@@ -2,16 +2,20 @@ package store
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"litechat/internal/model"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// SummaryStore 摘要状态 / 分片 / 任务队列
+// SummaryStore 管理摘要状态与分片。
 type SummaryStore struct {
 	db *DB
 }
+
+var ErrSummaryStateChanged = errors.New("摘要状态已变化，请刷新后重试")
 
 func NewSummaryStore(db *DB) *SummaryStore {
 	return &SummaryStore{db: db}
@@ -25,20 +29,29 @@ func (s *SummaryStore) EnsureState(chatID string) error {
 }
 
 func (s *SummaryStore) GetState(chatID string) (*model.ChatSummaryState, error) {
+	state := &model.ChatSummaryState{}
+	load := func() error {
+		var currentBig sql.NullString
+		err := s.db.QueryRow(`
+			SELECT chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq, updated_at
+			FROM chat_summary_state WHERE chat_id = ?`, chatID,
+		).Scan(&state.ChatID, &state.AppliedCutoffSeq, &currentBig, &state.DirtyFromSeq, &state.UpdatedAt)
+		if err == nil && currentBig.Valid {
+			state.CurrentBigSummary = currentBig.String
+		}
+		return err
+	}
+
+	if err := load(); err == nil {
+		return state, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	if err := s.EnsureState(chatID); err != nil {
 		return nil, err
 	}
-
-	state := &model.ChatSummaryState{}
-	var currentBig sql.NullString
-	if err := s.db.QueryRow(`
-		SELECT chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq, updated_at
-		FROM chat_summary_state WHERE chat_id = ?`, chatID,
-	).Scan(&state.ChatID, &state.AppliedCutoffSeq, &currentBig, &state.DirtyFromSeq, &state.UpdatedAt); err != nil {
+	if err := load(); err != nil {
 		return nil, err
-	}
-	if currentBig.Valid {
-		state.CurrentBigSummary = currentBig.String
 	}
 	return state, nil
 }
@@ -56,6 +69,98 @@ func (s *SummaryStore) ApplySmallSummary(chatID string, cutoffSeq int) error {
 		cutoffSeq, cutoffSeq, time.Now(), chatID,
 	)
 	return err
+}
+
+// CommitRollingSummaryAndExchange 在所有模型调用完成后，短暂开启事务并原子写入摘要与本轮消息。
+// expectedCutoffSeq / expectedLatestSeq 用于防止等待模型期间同一会话被其他请求修改。
+func (s *SummaryStore) CommitRollingSummaryAndExchange(
+	chatID string,
+	expectedCutoffSeq int,
+	expectedLatestSeq int,
+	expectedLatestID string,
+	summaryToSeq int,
+	summaryContent string,
+	userContent string,
+	assistantContent string,
+) error {
+	if summaryToSeq <= expectedCutoffSeq || summaryToSeq > expectedLatestSeq {
+		return fmt.Errorf("无效的摘要范围: cutoff=%d to=%d latest=%d", expectedCutoffSeq, summaryToSeq, expectedLatestSeq)
+	}
+	if summaryContent == "" || userContent == "" || assistantContent == "" {
+		return errors.New("摘要或本轮消息为空")
+	}
+
+	now := time.Now()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO chat_summary_state
+			(chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq, updated_at)
+		VALUES (?, 0, '', 0, ?)`, chatID, now); err != nil {
+		return err
+	}
+
+	var currentCutoff int
+	if err := tx.QueryRow(`
+		SELECT applied_cutoff_seq FROM chat_summary_state WHERE chat_id = ?`, chatID,
+	).Scan(&currentCutoff); err != nil {
+		return err
+	}
+	latestSeq := 0
+	latestID := ""
+	err = tx.QueryRow(`
+		SELECT seq, id FROM messages
+		WHERE chat_id = ?
+		ORDER BY seq DESC, created_at DESC LIMIT 1`, chatID,
+	).Scan(&latestSeq, &latestID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if currentCutoff != expectedCutoffSeq || latestSeq != expectedLatestSeq || latestID != expectedLatestID {
+		return ErrSummaryStateChanged
+	}
+
+	summaryID := uuid.New().String()
+	if _, err := tx.Exec(`
+		UPDATE chat_summary_chunks
+		SET status = 'dirty', updated_at = ?
+		WHERE chat_id = ? AND status != 'dirty'`, now, chatID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO chat_summary_chunks
+			(id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at)
+		VALUES (?, ?, 'big', 1, ?, ?, 'active', '', ?, ?)`,
+		summaryID, chatID, summaryToSeq, summaryContent, now, now); err != nil {
+		return err
+	}
+
+	userSeq := expectedLatestSeq + 1
+	assistantSeq := expectedLatestSeq + 2
+	if _, err := tx.Exec(`
+		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
+		VALUES (?, ?, ?, 'user', ?, 0, ?)`,
+		uuid.New().String(), chatID, userSeq, userContent, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
+		VALUES (?, ?, ?, 'assistant', ?, 0, ?)`,
+		uuid.New().String(), chatID, assistantSeq, assistantContent, now); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE chat_summary_state
+		SET applied_cutoff_seq = ?, current_big_summary_id = ?, dirty_from_seq = 0, updated_at = ?
+		WHERE chat_id = ?`, summaryToSeq, summaryID, now, chatID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SummaryStore) SetCurrentBigSummary(chatID, chunkID string) error {
@@ -230,188 +335,6 @@ func (s *SummaryStore) ResetCurrentBigSummaryIfDirty(chatID string) error {
 			SELECT id FROM chat_summary_chunks
 			WHERE chat_id = ? AND level = 'big' AND status = 'dirty'
 		)`, time.Now(), chatID, chatID)
-	return err
-}
-
-func (s *SummaryStore) ScheduleSmallJob(chatID string, fromSeq, toSeq, baseCutoffSeq int) error {
-	now := time.Now()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	var runningCount int
-	if err := tx.QueryRow(`
-		SELECT COUNT(*) FROM chat_summary_jobs
-		WHERE chat_id = ? AND job_type = 'small' AND status = 'running'`, chatID,
-	).Scan(&runningCount); err != nil {
-		return err
-	}
-	if runningCount > 0 {
-		if _, err := tx.Exec(`
-			UPDATE chat_summary_jobs
-			SET status = 'stale', last_error = 'superseded while another small summary was running', updated_at = ?
-			WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed')`,
-			now, chatID,
-		); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-
-	var existingID string
-	err = tx.QueryRow(`
-		SELECT id FROM chat_summary_jobs
-		WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed')
-		ORDER BY created_at ASC LIMIT 1`, chatID,
-	).Scan(&existingID)
-	if err != nil && err != sql.ErrNoRows {
-		return err
-	}
-	if err == nil {
-		if _, err := tx.Exec(`
-			UPDATE chat_summary_jobs
-			SET status = 'stale', last_error = 'duplicate small summary job removed', updated_at = ?
-			WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed') AND id != ?`,
-			now, chatID, existingID,
-		); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`
-			UPDATE chat_summary_jobs
-			SET from_seq = ?, to_seq = ?, base_cutoff_seq = ?, status = 'pending',
-			    attempt_count = 0, next_run_at = ?, last_error = '', updated_at = ?
-			WHERE id = ?`,
-			fromSeq, toSeq, baseCutoffSeq, now, now, existingID,
-		); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
-
-	_, err = tx.Exec(`
-		INSERT INTO chat_summary_jobs
-			(id, chat_id, job_type, from_seq, to_seq, base_cutoff_seq, status, attempt_count, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, 'small', ?, ?, ?, 'pending', 0, ?, '', ?, ?)`,
-		uuid.New().String(), chatID, fromSeq, toSeq, baseCutoffSeq, now, now, now,
-	)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *SummaryStore) RequeueInterruptedJobs() error {
-	now := time.Now()
-	_, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'pending', next_run_at = ?,
-		    last_error = CASE WHEN last_error = '' THEN 'requeued after process restart' ELSE last_error END,
-		    updated_at = ?
-		WHERE status = 'running'`, now, now)
-	return err
-}
-
-func (s *SummaryStore) MarkOpenJobsStale(chatID, reason string) error {
-	_, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'stale', last_error = ?, updated_at = ?
-		WHERE chat_id = ? AND status IN ('pending', 'running', 'failed')`,
-		reason, time.Now(), chatID)
-	return err
-}
-
-func (s *SummaryStore) IsJobRunning(jobID string) (bool, error) {
-	var count int
-	if err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM chat_summary_jobs WHERE id = ? AND status = 'running'`, jobID,
-	).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (s *SummaryStore) ScheduleBigJob(chatID string, fromSeq, toSeq, baseCutoffSeq int) error {
-	var count int
-	if err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM chat_summary_jobs
-		WHERE chat_id = ? AND job_type = 'big' AND status IN ('pending', 'running', 'failed')`, chatID,
-	).Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
-	now := time.Now()
-	_, err := s.db.Exec(`
-		INSERT INTO chat_summary_jobs
-			(id, chat_id, job_type, from_seq, to_seq, base_cutoff_seq, status, attempt_count, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, 'big', ?, ?, ?, 'pending', 0, ?, '', ?, ?)`,
-		uuid.New().String(), chatID, fromSeq, toSeq, baseCutoffSeq, now, now, now,
-	)
-	return err
-}
-
-func (s *SummaryStore) ClaimNextJob() (*model.ChatSummaryJob, error) {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	job := &model.ChatSummaryJob{}
-	err = tx.QueryRow(`
-		SELECT id, chat_id, job_type, from_seq, to_seq, base_cutoff_seq, status, attempt_count, next_run_at, last_error, created_at, updated_at
-		FROM chat_summary_jobs
-		WHERE status IN ('pending', 'failed') AND next_run_at <= ?
-		ORDER BY created_at ASC
-		LIMIT 1`, time.Now(),
-	).Scan(&job.ID, &job.ChatID, &job.JobType, &job.FromSeq, &job.ToSeq, &job.BaseCutoffSeq,
-		&job.Status, &job.AttemptCount, &job.NextRunAt, &job.LastError, &job.CreatedAt, &job.UpdatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	if _, err := tx.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'running', updated_at = ?
-		WHERE id = ?`, time.Now(), job.ID); err != nil {
-		return nil, err
-	}
-	job.Status = "running"
-
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return job, nil
-}
-
-func (s *SummaryStore) CompleteJob(jobID string) error {
-	_, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'succeeded', updated_at = ?
-		WHERE id = ?`, time.Now(), jobID)
-	return err
-}
-
-func (s *SummaryStore) MarkJobStale(jobID string, reason string) error {
-	_, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'stale', last_error = ?, updated_at = ?
-		WHERE id = ?`, reason, time.Now(), jobID)
-	return err
-}
-
-func (s *SummaryStore) FailJob(jobID string, attemptCount int, nextRunAt time.Time, lastError string) error {
-	_, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET status = 'failed', attempt_count = ?, next_run_at = ?, last_error = ?, updated_at = ?
-		WHERE id = ?`, attemptCount, nextRunAt, lastError, time.Now(), jobID)
 	return err
 }
 

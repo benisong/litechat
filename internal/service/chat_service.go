@@ -55,7 +55,7 @@ func NewChatService(
 // StreamCallback SSE 流式回调：每生成一个增量 token 就回调一次，用于边生成边推送。
 type StreamCallback func(token string) error
 
-// SendMessage 处理一次用户发送：落库用户消息、组装上下文、流式请求模型，再落库 AI 回复并触发摘要。
+// SendMessage 处理一次用户发送；摘要触发轮会在摘要与回复都成功后再原子落库。
 func (s *ChatService) SendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
 	// 读取会话并校验归属当前用户
 	chat, err := s.chatStore.GetByID(chatID, userID)
@@ -134,6 +134,19 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		}
 	}
 
+	// 摘要达到阈值时，本轮回复先缓存在内存；摘要成功后再原子落库并发送给客户端。
+	if s.summaryService != nil {
+		summaryPlan, err := s.summaryService.PlanSummaryForNextReply(chatID, history)
+		if err != nil {
+			return "", fmt.Errorf("消息摘要返回错误: %w", err)
+		}
+		if summaryPlan != nil {
+			return s.sendMessageThroughSummaryGate(
+				chatID, content, userID, preset, character, history, summaryPlan, callback,
+			)
+		}
+	}
+
 	// 把本次用户输入落库
 	userMsg := &model.Message{
 		ChatID:  chatID,
@@ -185,13 +198,70 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 回复失败: %w", err)
 	}
-	if s.summaryService != nil {
-		s.summaryService.OnAssistantMessageStored(chatID)
-	}
 
 	// 刷新会话的 updated_at 时间
 	_ = s.chatStore.Touch(chatID, userID)
 
+	return fullResponse, nil
+}
+
+func (s *ChatService) sendMessageThroughSummaryGate(
+	chatID string,
+	content string,
+	userID string,
+	preset *model.Preset,
+	character *model.Character,
+	history []*model.Message,
+	plan *summaryPlan,
+	callback StreamCallback,
+) (string, error) {
+	// 先生成上一段历史的摘要。失败时不请求聊天模型，也不写入本轮消息。
+	summaryContent, err := s.summaryService.GeneratePlannedSummary(plan)
+	if err != nil {
+		return "", fmt.Errorf("消息摘要返回错误: %w", err)
+	}
+	summaryContext, trimmedHistory, err := s.summaryService.BuildContextAfterPlannedSummary(plan, summaryContent, history)
+	if err != nil {
+		return "", fmt.Errorf("消息摘要返回错误: %w", err)
+	}
+	messages := s.buildMessagesWithSummaryContext(
+		chatID, preset, character, history, trimmedHistory, content, userID, summaryContext,
+	)
+
+	if DebugEnabled {
+		var msgDebug strings.Builder
+		msgDebug.WriteString(fmt.Sprintf("=== %s 摘要闸门 预设：%s (ID: %s) 消息条数: %d ===\n\n",
+			time.Now().Format("15:04:05"), preset.Name, preset.ID, len(messages)))
+		for i, m := range messages {
+			msgDebug.WriteString(fmt.Sprintf("[%d] role=%s\n%s\n\n", i, m.Role, m.Content))
+		}
+		debugFile := fmt.Sprintf("data/debug_messages_%d.txt", time.Now().UnixMilli())
+		_ = os.WriteFile(debugFile, []byte(msgDebug.String()), 0644)
+		log.Printf("[debug] 已写出摘要闸门请求消息到 %s（共 %d 条）", debugFile, len(messages))
+	}
+
+	settings, err := s.configStore.GetSettings()
+	if err != nil {
+		return "", fmt.Errorf("读取设置失败: %w", err)
+	}
+
+	// 丢弃流式增量，直到摘要成功并完成原子提交，避免用户看到最终无法落库的回复。
+	fullResponse, err := s.callFormattedOpenAIStream(settings, preset, messages, func(string) error { return nil })
+	s.debugLogResponse(chatID, fullResponse, err)
+	if err != nil {
+		return "", err
+	}
+
+	if err := s.summaryService.CommitSummaryAndExchange(plan, summaryContent, content, fullResponse); err != nil {
+		return "", fmt.Errorf("消息摘要返回错误: %w", err)
+	}
+
+	if callback != nil {
+		if err := callback(fullResponse); err != nil {
+			return "", err
+		}
+	}
+	_ = s.chatStore.Touch(chatID, userID)
 	return fullResponse, nil
 }
 
@@ -287,7 +357,6 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 	}
 	if s.summaryService != nil {
 		s.summaryService.InvalidateFromSeq(chatID, oldAISeq)
-		s.summaryService.OnAssistantMessageStored(chatID)
 	}
 
 	_ = s.chatStore.Touch(chatID, userID)
@@ -356,10 +425,6 @@ func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback Stre
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 回复失败: %w", err)
 	}
-	if s.summaryService != nil {
-		s.summaryService.OnAssistantMessageStored(chatID)
-	}
-
 	_ = s.chatStore.Touch(chatID, userID)
 	return fullResponse, nil
 }
@@ -810,7 +875,21 @@ func (s *ChatService) buildMessages(chatID string, preset *model.Preset, char *m
 	if s.summaryService != nil {
 		summaryContext, trimmedHistory = s.summaryService.BuildServiceModeContext(chatID, history)
 	}
+	return s.buildMessagesWithSummaryContext(
+		chatID, preset, char, history, trimmedHistory, userContent, userID, summaryContext,
+	)
+}
 
+func (s *ChatService) buildMessagesWithSummaryContext(
+	chatID string,
+	preset *model.Preset,
+	char *model.Character,
+	history []*model.Message,
+	trimmedHistory []*model.Message,
+	userContent string,
+	userID string,
+	summaryContext string,
+) []model.ChatCompletionMessage {
 	// 1. 组装聊天历史：首轮用开场白，否则用裁剪后的历史，并追加本次用户输入
 	var recentHistory []model.ChatCompletionMessage
 	if char.FirstMsg != "" && len(history) == 0 {

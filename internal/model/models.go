@@ -108,26 +108,26 @@ type WorldBook struct {
 
 // WorldBookEntry 世界书条目
 type WorldBookEntry struct {
-	ID             string    `json:"id" db:"id"`
-	UserID         string    `json:"user_id" db:"user_id"`
-	WorldBookID    string    `json:"world_book_id" db:"world_book_id"`
-	Keys           string    `json:"keys" db:"keys"`
-	SecondaryKeys  string    `json:"secondary_keys" db:"secondary_keys"`
-	Content        string    `json:"content" db:"content"`
-	Enabled        bool      `json:"enabled" db:"enabled"`
-	Constant       bool      `json:"constant" db:"constant"`
-	Priority       int       `json:"priority" db:"priority"`
-	InjectionPos   int       `json:"injection_position" db:"injection_position"`
-	InjectionDepth int       `json:"injection_depth" db:"injection_depth"`
-	ScanDepth      int       `json:"scan_depth" db:"scan_depth"`
-	CaseSensitive  bool      `json:"case_sensitive" db:"case_sensitive"`
-	Order          int       `json:"order" db:"order_num"`
-	Role           string    `json:"role" db:"role"`
+	ID             string `json:"id" db:"id"`
+	UserID         string `json:"user_id" db:"user_id"`
+	WorldBookID    string `json:"world_book_id" db:"world_book_id"`
+	Keys           string `json:"keys" db:"keys"`
+	SecondaryKeys  string `json:"secondary_keys" db:"secondary_keys"`
+	Content        string `json:"content" db:"content"`
+	Enabled        bool   `json:"enabled" db:"enabled"`
+	Constant       bool   `json:"constant" db:"constant"`
+	Priority       int    `json:"priority" db:"priority"`
+	InjectionPos   int    `json:"injection_position" db:"injection_position"`
+	InjectionDepth int    `json:"injection_depth" db:"injection_depth"`
+	ScanDepth      int    `json:"scan_depth" db:"scan_depth"`
+	CaseSensitive  bool   `json:"case_sensitive" db:"case_sensitive"`
+	Order          int    `json:"order" db:"order_num"`
+	Role           string `json:"role" db:"role"`
 	// 状态栏专用的本地渲染配色（仅状态栏特殊条目使用，普通条目留空）
-	BgColor        string    `json:"bg_color" db:"bg_color"`
-	FontColor      string    `json:"font_color" db:"font_color"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
+	BgColor   string    `json:"bg_color" db:"bg_color"`
+	FontColor string    `json:"font_color" db:"font_color"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // Config 全局配置
@@ -172,22 +172,6 @@ type ChatSummaryChunk struct {
 	MergedIntoID string    `json:"merged_into_id" db:"merged_into_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
-}
-
-// ChatSummaryJob 摘要后台任务
-type ChatSummaryJob struct {
-	ID            string    `json:"id" db:"id"`
-	ChatID        string    `json:"chat_id" db:"chat_id"`
-	JobType       string    `json:"job_type" db:"job_type"`
-	FromSeq       int       `json:"from_seq" db:"from_seq"`
-	ToSeq         int       `json:"to_seq" db:"to_seq"`
-	BaseCutoffSeq int       `json:"base_cutoff_seq" db:"base_cutoff_seq"`
-	Status        string    `json:"status" db:"status"`
-	AttemptCount  int       `json:"attempt_count" db:"attempt_count"`
-	NextRunAt     time.Time `json:"next_run_at" db:"next_run_at"`
-	LastError     string    `json:"last_error" db:"last_error"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // SendMessageRequest 发送消息请求
