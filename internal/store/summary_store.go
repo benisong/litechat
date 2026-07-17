@@ -121,7 +121,7 @@ func (s *SummaryStore) ListActiveSmallChunks(chatID string) ([]*model.ChatSummar
 		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'small' AND status = 'active'
-		ORDER BY from_seq ASC`, chatID)
+		ORDER BY from_seq ASC, to_seq DESC`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,8 @@ func (s *SummaryStore) GetLatestUsableBigChunk(chatID string, maxToSeq int) (*mo
 	row := s.db.QueryRow(`
 		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
-		WHERE chat_id = ? AND level = 'big' AND status IN ('active', 'superseded') AND to_seq <= ?
+		WHERE chat_id = ? AND level = 'big' AND status IN ('active', 'superseded')
+		  AND from_seq <= 1 AND to_seq <= ?
 		ORDER BY to_seq DESC LIMIT 1`, chatID, maxToSeq)
 	return scanSummaryChunk(row)
 }
@@ -160,7 +161,7 @@ func (s *SummaryStore) ListUsableSmallChunks(chatID string, maxToSeq int) ([]*mo
 		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'small' AND status IN ('active', 'merged') AND to_seq <= ?
-		ORDER BY from_seq ASC`, chatID, maxToSeq)
+		ORDER BY from_seq ASC, to_seq DESC`, chatID, maxToSeq)
 	if err != nil {
 		return nil, err
 	}
@@ -234,49 +235,108 @@ func (s *SummaryStore) ResetCurrentBigSummaryIfDirty(chatID string) error {
 
 func (s *SummaryStore) ScheduleSmallJob(chatID string, fromSeq, toSeq, baseCutoffSeq int) error {
 	now := time.Now()
-	result, err := s.db.Exec(`
-		UPDATE chat_summary_jobs
-		SET from_seq = ?, to_seq = ?, base_cutoff_seq = ?, status = 'pending',
-		    attempt_count = 0, next_run_at = ?, last_error = '', updated_at = ?
-		WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed')`,
-		fromSeq, toSeq, baseCutoffSeq, now, now, chatID,
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var runningCount int
+	if err := tx.QueryRow(`
+		SELECT COUNT(*) FROM chat_summary_jobs
+		WHERE chat_id = ? AND job_type = 'small' AND status = 'running'`, chatID,
+	).Scan(&runningCount); err != nil {
+		return err
+	}
+	if runningCount > 0 {
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_jobs
+			SET status = 'stale', last_error = 'superseded while another small summary was running', updated_at = ?
+			WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed')`,
+			now, chatID,
+		); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	var existingID string
+	err = tx.QueryRow(`
+		SELECT id FROM chat_summary_jobs
+		WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed')
+		ORDER BY created_at ASC LIMIT 1`, chatID,
+	).Scan(&existingID)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_jobs
+			SET status = 'stale', last_error = 'duplicate small summary job removed', updated_at = ?
+			WHERE chat_id = ? AND job_type = 'small' AND status IN ('pending', 'failed') AND id != ?`,
+			now, chatID, existingID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_jobs
+			SET from_seq = ?, to_seq = ?, base_cutoff_seq = ?, status = 'pending',
+			    attempt_count = 0, next_run_at = ?, last_error = '', updated_at = ?
+			WHERE id = ?`,
+			fromSeq, toSeq, baseCutoffSeq, now, now, existingID,
+		); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO chat_summary_jobs
+			(id, chat_id, job_type, from_seq, to_seq, base_cutoff_seq, status, attempt_count, next_run_at, last_error, created_at, updated_at)
+		VALUES (?, ?, 'small', ?, ?, ?, 'pending', 0, ?, '', ?, ?)`,
+		uuid.New().String(), chatID, fromSeq, toSeq, baseCutoffSeq, now, now, now,
 	)
 	if err != nil {
 		return err
 	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		return nil
-	}
+	return tx.Commit()
+}
 
-	job := &model.ChatSummaryJob{
-		ID:            uuid.New().String(),
-		ChatID:        chatID,
-		JobType:       "small",
-		FromSeq:       fromSeq,
-		ToSeq:         toSeq,
-		BaseCutoffSeq: baseCutoffSeq,
-		Status:        "pending",
-		NextRunAt:     now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-
-	_, err = s.db.Exec(`
-		INSERT INTO chat_summary_jobs
-			(id, chat_id, job_type, from_seq, to_seq, base_cutoff_seq, status, attempt_count, next_run_at, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		job.ID, job.ChatID, job.JobType, job.FromSeq, job.ToSeq, job.BaseCutoffSeq,
-		job.Status, job.AttemptCount, job.NextRunAt, job.LastError, job.CreatedAt, job.UpdatedAt,
-	)
+func (s *SummaryStore) RequeueInterruptedJobs() error {
+	now := time.Now()
+	_, err := s.db.Exec(`
+		UPDATE chat_summary_jobs
+		SET status = 'pending', next_run_at = ?,
+		    last_error = CASE WHEN last_error = '' THEN 'requeued after process restart' ELSE last_error END,
+		    updated_at = ?
+		WHERE status = 'running'`, now, now)
 	return err
+}
+
+func (s *SummaryStore) MarkOpenJobsStale(chatID, reason string) error {
+	_, err := s.db.Exec(`
+		UPDATE chat_summary_jobs
+		SET status = 'stale', last_error = ?, updated_at = ?
+		WHERE chat_id = ? AND status IN ('pending', 'running', 'failed')`,
+		reason, time.Now(), chatID)
+	return err
+}
+
+func (s *SummaryStore) IsJobRunning(jobID string) (bool, error) {
+	var count int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM chat_summary_jobs WHERE id = ? AND status = 'running'`, jobID,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (s *SummaryStore) ScheduleBigJob(chatID string, fromSeq, toSeq, baseCutoffSeq int) error {
 	var count int
 	if err := s.db.QueryRow(`
 		SELECT COUNT(*) FROM chat_summary_jobs
-		WHERE chat_id = ? AND job_type = 'big' AND status IN ('pending', 'running')`, chatID,
+		WHERE chat_id = ? AND job_type = 'big' AND status IN ('pending', 'running', 'failed')`, chatID,
 	).Scan(&count); err != nil {
 		return err
 	}

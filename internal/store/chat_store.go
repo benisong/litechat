@@ -241,6 +241,25 @@ func (s *MessageStore) LatestSeq(chatID string) (int, error) {
 	return int(seq.Int64), nil
 }
 
+// ListChatIDs 返回已有消息的会话，供启动时恢复摘要积压。
+func (s *MessageStore) ListChatIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT chat_id FROM messages ORDER BY chat_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chatIDs []string
+	for rows.Next() {
+		var chatID string
+		if err := rows.Scan(&chatID); err != nil {
+			return nil, err
+		}
+		chatIDs = append(chatIDs, chatID)
+	}
+	return chatIDs, rows.Err()
+}
+
 func (s *MessageStore) LatestUserSeq(chatID string) (int, error) {
 	var seq sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MAX(seq) FROM messages WHERE chat_id = ? AND role = 'user'`, chatID).Scan(&seq); err != nil {

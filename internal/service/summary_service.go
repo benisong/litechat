@@ -18,10 +18,10 @@ import (
 const (
 	summarySmallThreshold = 3000
 	summaryRawOverlap     = 12
+	summaryMaxRawChars    = 12000
 	summaryMergeCount     = 5
 	summarySmallMaxTokens = 2000
 	summaryBigMaxTokens   = 3200
-	summaryMaxJobFailures = 3
 )
 
 const defaultMemoryPromptSuffix = `- 必须保留会影响后续回复的稳定事实：人物、地点、物品、组织、时间线、约定、偏好、禁忌、称呼、任务状态。
@@ -84,24 +84,53 @@ func NewSummaryService(
 }
 
 func (s *SummaryService) Start() {
-	go s.workerLoop()
+	go func() {
+		s.bootstrap()
+		s.workerLoop()
+	}()
+}
+
+func (s *SummaryService) bootstrap() {
+	if err := s.summaryStore.RequeueInterruptedJobs(); err != nil {
+		log.Printf("[summary] 恢复中断任务失败: %v", err)
+	}
+	if !s.isEnabled() {
+		return
+	}
+
+	chatIDs, err := s.messageStore.ListChatIDs()
+	if err != nil {
+		log.Printf("[summary] 扫描已有会话失败: %v", err)
+		return
+	}
+	for _, chatID := range chatIDs {
+		if err := s.scheduleSmallIfNeeded(chatID, false); err != nil {
+			log.Printf("[summary] 启动修复失败 chat=%s: %v", chatID, err)
+		}
+	}
+	s.wake()
 }
 
 func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model.Message) (string, []*model.Message) {
 	if !s.isEnabled() {
 		return "", history
 	}
+	if err := s.scheduleSmallIfNeeded(chatID, false); err != nil {
+		log.Printf("[summary] 请求前检查失败 chat=%s: %v", chatID, err)
+	} else {
+		s.wake()
+	}
 
-	state, err := s.summaryStore.GetState(chatID)
+	state, err := s.reconcileSummaryState(chatID)
 	if err != nil {
-		log.Printf("[摘要] 读取状态失败 chat=%s: %v", chatID, err)
-		return "", history
+		log.Printf("[summary] 读取或修复状态失败 chat=%s: %v", chatID, err)
+		return "", trimHistoryByEffectiveChars(history, summaryMaxRawChars)
 	}
 
 	bigSummary, smallSummaries, coverageTo, err := s.resolveUsableSummaryCoverage(chatID, state.AppliedCutoffSeq)
 	if err != nil {
-		log.Printf("[摘要] 解析可用摘要前缀失败 chat=%s: %v", chatID, err)
-		return "", history
+		log.Printf("[summary] 解析可用摘要前缀失败 chat=%s: %v", chatID, err)
+		return "", trimHistoryByEffectiveChars(history, summaryMaxRawChars)
 	}
 
 	var summaryBlocks []string
@@ -112,14 +141,11 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 		summaryBlocks = append(summaryBlocks, renderSummaryChunkForContext(fmt.Sprintf("会话小摘要 %d", i+1), chunk.Content))
 	}
 	if len(summaryBlocks) == 0 {
-		return "", history
+		return "", trimHistoryByEffectiveChars(history, summaryMaxRawChars)
 	}
 
 	if coverageTo <= 0 {
-		return strings.Join(summaryBlocks, "\n\n"), history
-	}
-	if !summaryCoverageStartsAtBeginning(bigSummary, smallSummaries) {
-		return strings.Join(summaryBlocks, "\n\n"), history
+		return strings.Join(summaryBlocks, "\n\n"), trimHistoryByEffectiveChars(history, summaryMaxRawChars)
 	}
 
 	rawStartSeq := coverageTo - summaryRawOverlap + 1
@@ -133,6 +159,9 @@ func (s *SummaryService) BuildServiceModeContext(chatID string, history []*model
 			filtered = append(filtered, msg)
 		}
 	}
+	filtered = trimHistoryByEffectiveChars(filtered, summaryMaxRawChars)
+	log.Printf("[summary] 上下文已压缩 chat=%s cutoff=%d coverage=%d history=%d recent=%d",
+		chatID, state.AppliedCutoffSeq, coverageTo, len(history), len(filtered))
 
 	return strings.Join(summaryBlocks, "\n\n"), filtered
 }
@@ -161,11 +190,14 @@ func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq in
 	for _, chunk := range smallChunks {
 		switch {
 		case coverageTo == 0:
+			if chunk.FromSeq > 1 {
+				return nil, nil, 0, nil
+			}
 			usableSmalls = append(usableSmalls, chunk)
 			coverageTo = chunk.ToSeq
 		case chunk.ToSeq <= coverageTo:
 			continue
-		case chunk.FromSeq != coverageTo+1:
+		case chunk.FromSeq > coverageTo+1:
 			return bigChunk, usableSmalls, coverageTo, nil
 		default:
 			usableSmalls = append(usableSmalls, chunk)
@@ -180,11 +212,41 @@ func (s *SummaryService) resolveUsableSummaryCoverage(chatID string, maxToSeq in
 	return bigChunk, usableSmalls, coverageTo, nil
 }
 
-func summaryCoverageStartsAtBeginning(bigChunk *model.ChatSummaryChunk, smallChunks []*model.ChatSummaryChunk) bool {
-	if bigChunk != nil {
-		return bigChunk.FromSeq <= 1
+func (s *SummaryService) reconcileSummaryState(chatID string) (*model.ChatSummaryState, error) {
+	state, err := s.summaryStore.GetState(chatID)
+	if err != nil {
+		return nil, err
 	}
-	return len(smallChunks) > 0 && smallChunks[0].FromSeq <= 1
+	if state.AppliedCutoffSeq <= 0 {
+		return state, nil
+	}
+
+	_, _, coverageTo, err := s.resolveUsableSummaryCoverage(chatID, state.AppliedCutoffSeq)
+	if err != nil {
+		return nil, err
+	}
+	if coverageTo == state.AppliedCutoffSeq {
+		return state, nil
+	}
+
+	repairFrom := coverageTo + 1
+	reason := fmt.Sprintf("summary coverage repaired from cutoff %d to %d", state.AppliedCutoffSeq, coverageTo)
+	if err := s.summaryStore.MarkOpenJobsStale(chatID, reason); err != nil {
+		return nil, err
+	}
+	if err := s.summaryStore.MarkChunksDirtyFromSeq(chatID, repairFrom); err != nil {
+		return nil, err
+	}
+	if err := s.summaryStore.ResetCurrentBigSummaryIfDirty(chatID); err != nil {
+		return nil, err
+	}
+	if err := s.summaryStore.RollbackCutoff(chatID, coverageTo, repairFrom); err != nil {
+		return nil, err
+	}
+
+	log.Printf("[summary] 已修复摘要断层 chat=%s old_cutoff=%d coverage=%d rebuild_from=%d",
+		chatID, state.AppliedCutoffSeq, coverageTo, repairFrom)
+	return s.summaryStore.GetState(chatID)
 }
 
 func (s *SummaryService) OnAssistantMessageStored(chatID string) {
@@ -243,7 +305,7 @@ func (s *SummaryService) InvalidateFromSeq(chatID string, fromSeq int) {
 }
 
 func (s *SummaryService) scheduleSmallIfNeeded(chatID string, force bool) error {
-	state, err := s.summaryStore.GetState(chatID)
+	state, err := s.reconcileSummaryState(chatID)
 	if err != nil {
 		return err
 	}
@@ -266,31 +328,34 @@ func (s *SummaryService) scheduleSmallIfNeeded(chatID string, force bool) error 
 	if !force && countEffectiveChars(messages) < summarySmallThreshold {
 		return s.scheduleBigIfNeeded(chatID)
 	}
+	toSeq := selectSmallSummaryEnd(messages, force)
+	if toSeq <= 0 {
+		return s.scheduleBigIfNeeded(chatID)
+	}
 
-	if err := s.summaryStore.ScheduleSmallJob(chatID, state.AppliedCutoffSeq+1, latestSeq, state.AppliedCutoffSeq); err != nil {
+	if err := s.summaryStore.ScheduleSmallJob(chatID, state.AppliedCutoffSeq+1, toSeq, state.AppliedCutoffSeq); err != nil {
 		return err
 	}
+	log.Printf("[summary] 已调度小摘要 chat=%s range=%d-%d latest=%d",
+		chatID, state.AppliedCutoffSeq+1, toSeq, latestSeq)
 	return s.scheduleBigIfNeeded(chatID)
 }
 
 func (s *SummaryService) scheduleBigIfNeeded(chatID string) error {
-	count, err := s.summaryStore.CountActiveSmallChunks(chatID)
+	activeBig, err := s.summaryStore.GetActiveBigChunk(chatID)
 	if err != nil {
 		return err
 	}
-	if count < summaryMergeCount {
-		return nil
-	}
-
 	smalls, err := s.summaryStore.ListActiveSmallChunks(chatID)
 	if err != nil {
 		return err
 	}
-	if len(smalls) < summaryMergeCount {
+	targetSmalls := selectMergeableSmallChunks(activeBig, smalls, summaryMergeCount)
+	if len(targetSmalls) < summaryMergeCount {
 		return nil
 	}
 
-	return s.summaryStore.ScheduleBigJob(chatID, smalls[0].FromSeq, smalls[summaryMergeCount-1].ToSeq, 0)
+	return s.summaryStore.ScheduleBigJob(chatID, targetSmalls[0].FromSeq, targetSmalls[len(targetSmalls)-1].ToSeq, 0)
 }
 
 func (s *SummaryService) workerLoop() {
@@ -343,6 +408,17 @@ func (s *SummaryService) processNextJob() (bool, error) {
 		if err := s.summaryStore.CompleteJob(job.ID); err != nil {
 			return true, err
 		}
+		switch job.JobType {
+		case "small":
+			if err := s.scheduleSmallIfNeeded(job.ChatID, false); err != nil {
+				return true, err
+			}
+		case "big":
+			if err := s.scheduleBigIfNeeded(job.ChatID); err != nil {
+				return true, err
+			}
+		}
+		s.wake()
 		return true, nil
 	}
 
@@ -350,73 +426,25 @@ func (s *SummaryService) processNextJob() (bool, error) {
 		if err := s.summaryStore.MarkJobStale(job.ID, runErr.Error()); err != nil {
 			return true, err
 		}
+		if job.JobType == "small" {
+			if err := s.scheduleSmallIfNeeded(job.ChatID, false); err != nil {
+				return true, err
+			}
+		} else if err := s.scheduleBigIfNeeded(job.ChatID); err != nil {
+			return true, err
+		}
+		s.wake()
 		return true, nil
 	}
 
 	attempt := job.AttemptCount + 1
-	if attempt >= summaryMaxJobFailures {
-		if err := s.handleSummaryJobFailuresExhausted(job, runErr); err != nil {
-			return true, err
-		}
-		return true, nil
-	}
-
 	nextRunAt := time.Now().Add(nextRetryDelay(attempt))
 	if err := s.summaryStore.FailJob(job.ID, attempt, nextRunAt, runErr.Error()); err != nil {
 		return true, err
 	}
+	log.Printf("[summary] 摘要任务失败，将保持原连续区间重试 job=%s chat=%s type=%s range=%d-%d attempt=%d next=%s err=%v",
+		job.ID, job.ChatID, job.JobType, job.FromSeq, job.ToSeq, attempt, nextRunAt.Format(time.RFC3339), runErr)
 	return true, nil
-}
-
-func (s *SummaryService) handleSummaryJobFailuresExhausted(job *model.ChatSummaryJob, runErr error) error {
-	userSeq, err := s.messageStore.LatestUserSeq(job.ChatID)
-	if err != nil {
-		return err
-	}
-	if userSeq <= 0 {
-		return s.summaryStore.MarkJobStale(job.ID, fmt.Sprintf("summary failed after %d attempts and no user node exists: %v", summaryMaxJobFailures, runErr))
-	}
-
-	reason := fmt.Sprintf("summary failed after %d attempts; resummarizing from user seq %d: %v", summaryMaxJobFailures, userSeq, runErr)
-	if err := s.summaryStore.MarkJobStale(job.ID, reason); err != nil {
-		return err
-	}
-	if err := s.rebuildSummaryFromSeq(job.ChatID, userSeq); err != nil {
-		return err
-	}
-	log.Printf("[summary] job=%s exhausted retries; rescheduled chat=%s from user seq=%d", job.ID, job.ChatID, userSeq)
-	s.wake()
-	return nil
-}
-
-func (s *SummaryService) rebuildSummaryFromSeq(chatID string, fromSeq int) error {
-	if fromSeq <= 0 {
-		return nil
-	}
-
-	latestSeq, err := s.messageStore.LatestSeq(chatID)
-	if err != nil {
-		return err
-	}
-	if latestSeq < fromSeq {
-		return nil
-	}
-
-	if err := s.summaryStore.MarkChunksDirtyFromSeq(chatID, fromSeq); err != nil {
-		return err
-	}
-	if err := s.summaryStore.ResetCurrentBigSummaryIfDirty(chatID); err != nil {
-		return err
-	}
-
-	baseCutoffSeq := fromSeq - 1
-	if baseCutoffSeq < 0 {
-		baseCutoffSeq = 0
-	}
-	if err := s.summaryStore.RollbackCutoff(chatID, baseCutoffSeq, fromSeq); err != nil {
-		return err
-	}
-	return s.summaryStore.ScheduleSmallJob(chatID, fromSeq, latestSeq, baseCutoffSeq)
 }
 
 func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
@@ -424,8 +452,8 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	if err != nil {
 		return err
 	}
-	if state.AppliedCutoffSeq >= job.ToSeq {
-		return fmt.Errorf("stale: job range already summarized")
+	if state.AppliedCutoffSeq != job.BaseCutoffSeq || job.FromSeq != state.AppliedCutoffSeq+1 {
+		return fmt.Errorf("stale: job does not continue current cutoff")
 	}
 	if state.DirtyFromSeq > 0 && state.DirtyFromSeq != job.FromSeq && state.DirtyFromSeq <= job.ToSeq {
 		return fmt.Errorf("stale: job range invalidated by newer change")
@@ -468,8 +496,8 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	if err != nil {
 		return err
 	}
-	if state.AppliedCutoffSeq >= job.ToSeq {
-		return fmt.Errorf("stale: cutoff moved past current job")
+	if state.AppliedCutoffSeq != job.BaseCutoffSeq || job.FromSeq != state.AppliedCutoffSeq+1 {
+		return fmt.Errorf("stale: cutoff changed during generation")
 	}
 
 	currentRawMessages, err := s.messageStore.ListByChatIDRange(job.ChatID, job.FromSeq, job.ToSeq)
@@ -482,6 +510,13 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	}
 	if summarySourceFingerprint(currentActiveBig, currentPrecedingSmalls, currentRawMessages) != sourceFingerprint {
 		return fmt.Errorf("stale: summary sources changed during generation")
+	}
+	running, err := s.summaryStore.IsJobRunning(job.ID)
+	if err != nil {
+		return err
+	}
+	if !running {
+		return fmt.Errorf("stale: job was cancelled during generation")
 	}
 
 	chunk := &model.ChatSummaryChunk{
@@ -498,7 +533,8 @@ func (s *SummaryService) runSmallJob(job *model.ChatSummaryJob) error {
 	if err := s.summaryStore.ApplySmallSummary(job.ChatID, job.ToSeq); err != nil {
 		return err
 	}
-	return s.scheduleBigIfNeeded(job.ChatID)
+	log.Printf("[summary] 小摘要已应用 chat=%s range=%d-%d", job.ChatID, job.FromSeq, job.ToSeq)
+	return nil
 }
 
 func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
@@ -515,11 +551,11 @@ func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
 	if err != nil {
 		return err
 	}
-	if len(activeSmalls) < summaryMergeCount {
+	targetSmalls := selectMergeableSmallChunks(activeBig, activeSmalls, summaryMergeCount)
+	if len(targetSmalls) < summaryMergeCount {
 		return fmt.Errorf("stale: active small summaries are not enough")
 	}
 
-	targetSmalls := activeSmalls[:summaryMergeCount]
 	coverageTo := targetSmalls[len(targetSmalls)-1].ToSeq
 	state, err := s.summaryStore.GetState(job.ChatID)
 	if err != nil {
@@ -552,11 +588,19 @@ func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
 	if err != nil {
 		return err
 	}
-	if len(currentActiveSmalls) < summaryMergeCount {
+	currentTargetSmalls := selectMergeableSmallChunks(currentActiveBig, currentActiveSmalls, summaryMergeCount)
+	if len(currentTargetSmalls) < summaryMergeCount {
 		return fmt.Errorf("stale: active small summaries changed during merge")
 	}
-	if summarySourceFingerprint(currentActiveBig, currentActiveSmalls[:summaryMergeCount], nil) != sourceFingerprint {
+	if summarySourceFingerprint(currentActiveBig, currentTargetSmalls, nil) != sourceFingerprint {
 		return fmt.Errorf("stale: merge sources changed during generation")
+	}
+	running, err := s.summaryStore.IsJobRunning(job.ID)
+	if err != nil {
+		return err
+	}
+	if !running {
+		return fmt.Errorf("stale: merge job was cancelled during generation")
 	}
 
 	if activeBig != nil {
@@ -582,7 +626,11 @@ func (s *SummaryService) runBigJob(job *model.ChatSummaryJob) error {
 	if err := s.summaryStore.MarkSmallChunksMerged(smallIDs, bigChunk.ID); err != nil {
 		return err
 	}
-	return s.summaryStore.SetCurrentBigSummary(job.ChatID, bigChunk.ID)
+	if err := s.summaryStore.SetCurrentBigSummary(job.ChatID, bigChunk.ID); err != nil {
+		return err
+	}
+	log.Printf("[summary] 大摘要已合并 chat=%s range=%d-%d", job.ChatID, bigChunk.FromSeq, bigChunk.ToSeq)
+	return nil
 }
 
 func (s *SummaryService) callSummaryCompletion(settings *model.AppSettings, prompt string, maxTokens int) (string, error) {
@@ -756,26 +804,22 @@ func parseSummaryChunk(raw string) (string, error) {
 		return "", fmt.Errorf("摘要结果为空")
 	}
 
-	summary := parsedSummary{}
-	var missing []string
-	if summary.Plot = normalizeRequiredSummaryField(cleaned, "plot", &missing); summary.Plot == "" {
-		summary.Plot = "无"
+	summary := parsedSummary{
+		Plot:         strings.TrimSpace(extractTaggedContent(cleaned, "plot")),
+		Relationship: strings.TrimSpace(extractTaggedContent(cleaned, "relationship")),
+		UserFacts:    strings.TrimSpace(extractTaggedContent(cleaned, "user_facts")),
+		WorldState:   strings.TrimSpace(extractTaggedContent(cleaned, "world_state")),
+		OpenLoops:    strings.TrimSpace(extractTaggedContent(cleaned, "open_loops")),
 	}
-	if summary.Relationship = normalizeRequiredSummaryField(cleaned, "relationship", &missing); summary.Relationship == "" {
-		summary.Relationship = "无"
+	if summary.Plot == "" && summary.Relationship == "" && summary.UserFacts == "" && summary.WorldState == "" && summary.OpenLoops == "" {
+		// 部分兼容接口不会严格遵循 XML；保留其完整摘要，避免格式问题让压缩链路永久停摆。
+		summary.Plot = cleaned
 	}
-	if summary.UserFacts = normalizeRequiredSummaryField(cleaned, "user_facts", &missing); summary.UserFacts == "" {
-		summary.UserFacts = "无"
-	}
-	if summary.WorldState = normalizeRequiredSummaryField(cleaned, "world_state", &missing); summary.WorldState == "" {
-		summary.WorldState = "无"
-	}
-	if summary.OpenLoops = normalizeRequiredSummaryField(cleaned, "open_loops", &missing); summary.OpenLoops == "" {
-		summary.OpenLoops = "无"
-	}
-	if len(missing) > 0 {
-		return "", fmt.Errorf("摘要字段不完整: %s", strings.Join(missing, ", "))
-	}
+	summary.Plot = normalizeSummaryField(summary.Plot)
+	summary.Relationship = normalizeSummaryField(summary.Relationship)
+	summary.UserFacts = normalizeSummaryField(summary.UserFacts)
+	summary.WorldState = normalizeSummaryField(summary.WorldState)
+	summary.OpenLoops = normalizeSummaryField(summary.OpenLoops)
 
 	return fmt.Sprintf(
 		"<chat_summary>\n<plot>%s</plot>\n<relationship>%s</relationship>\n<user_facts>%s</user_facts>\n<world_state>%s</world_state>\n<open_loops>%s</open_loops>\n</chat_summary>",
@@ -818,15 +862,6 @@ func normalizeSummaryField(raw string) string {
 	return raw
 }
 
-func normalizeRequiredSummaryField(raw, tag string, missing *[]string) string {
-	value := strings.TrimSpace(extractTaggedContent(raw, tag))
-	if value == "" {
-		*missing = append(*missing, tag)
-		return ""
-	}
-	return normalizeSummaryField(value)
-}
-
 func appendMemoryPromptSuffix(builder *strings.Builder, suffix string) {
 	if defaultSuffix := strings.TrimSpace(defaultMemoryPromptSuffix); defaultSuffix != "" {
 		builder.WriteString(defaultSuffix)
@@ -842,16 +877,104 @@ func appendMemoryPromptSuffix(builder *strings.Builder, suffix string) {
 func countEffectiveChars(messages []*model.Message) int {
 	total := 0
 	for _, msg := range messages {
-		content := strings.TrimSpace(msg.Content)
-		if msg.Role == "assistant" {
-			content = cleanAssistantContent(content)
-		}
-		if content == "" {
-			continue
-		}
-		total += len([]rune(content))
+		total += effectiveMessageChars(msg)
 	}
 	return total
+}
+
+func effectiveMessageChars(msg *model.Message) int {
+	if msg == nil {
+		return 0
+	}
+	content := strings.TrimSpace(msg.Content)
+	if msg.Role == "assistant" {
+		content = cleanAssistantContent(content)
+	}
+	return len([]rune(content))
+}
+
+func selectSmallSummaryEnd(messages []*model.Message, force bool) int {
+	effectiveChars := 0
+	for _, msg := range messages {
+		effectiveChars += effectiveMessageChars(msg)
+		if effectiveChars >= summarySmallThreshold && msg.Role == "assistant" {
+			return msg.Seq
+		}
+	}
+	if !force || len(messages) == 0 {
+		return 0
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			return messages[i].Seq
+		}
+	}
+	return messages[len(messages)-1].Seq
+}
+
+func trimHistoryByEffectiveChars(history []*model.Message, maxChars int) []*model.Message {
+	if len(history) == 0 || maxChars <= 0 || countEffectiveChars(history) <= maxChars {
+		return history
+	}
+
+	start := len(history)
+	total := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		chars := effectiveMessageChars(history[i])
+		if start < len(history) && total+chars > maxChars {
+			break
+		}
+		start = i
+		total += chars
+		if total >= maxChars {
+			break
+		}
+	}
+	if start >= len(history) {
+		start = len(history) - 1
+	}
+	if history[start].Role == "assistant" {
+		for i := start + 1; i < len(history); i++ {
+			if history[i].Role == "user" {
+				start = i
+				break
+			}
+		}
+	}
+	return history[start:]
+}
+
+func selectMergeableSmallChunks(bigChunk *model.ChatSummaryChunk, chunks []*model.ChatSummaryChunk, limit int) []*model.ChatSummaryChunk {
+	if limit <= 0 {
+		return nil
+	}
+	coverageTo := 0
+	if bigChunk != nil {
+		if bigChunk.FromSeq > 1 {
+			return nil
+		}
+		coverageTo = bigChunk.ToSeq
+	}
+
+	selected := make([]*model.ChatSummaryChunk, 0, limit)
+	for _, chunk := range chunks {
+		if chunk.ToSeq <= coverageTo {
+			continue
+		}
+		if coverageTo == 0 {
+			if chunk.FromSeq > 1 {
+				break
+			}
+		} else if chunk.FromSeq > coverageTo+1 {
+			break
+		}
+		selected = append(selected, chunk)
+		coverageTo = chunk.ToSeq
+		if len(selected) == limit {
+			break
+		}
+	}
+	return selected
 }
 
 func nextRetryDelay(attempt int) time.Duration {

@@ -15,6 +15,7 @@ func newTestChatServiceWithStore(t *testing.T) (*ChatService, *store.WorldBookSt
 	if err != nil {
 		t.Fatalf("NewDB: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Close() })
 	if err := db.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
