@@ -84,6 +84,80 @@ func TestBuildCharacterCardPromptEncouragesFlexibleCharacterization(t *testing.T
 	}
 }
 
+func TestResolveCharacterTemplateChoiceUsesCustomInput(t *testing.T) {
+	usePreset := false
+	choice, err := resolveCharacterTemplateChoice(
+		"故事场景",
+		"不支持的故事场景",
+		"city",
+		"  一座每逢涨潮就会改变街道布局的海港城  ",
+		&usePreset,
+		characterSettingOptions,
+	)
+	if err != nil {
+		t.Fatalf("resolveCharacterTemplateChoice returned error: %v", err)
+	}
+	if !choice.IsCustom {
+		t.Fatal("expected a custom template choice")
+	}
+	if choice.Hint != "一座每逢涨潮就会改变街道布局的海港城" {
+		t.Fatalf("unexpected custom choice: %+v", choice)
+	}
+
+	prompt := buildCharacterCardPrompt(
+		characterGenderOptions["female"],
+		choice,
+		templateChoiceOption{Hint: "两人是互不信任但必须合作的调查搭档", IsCustom: true},
+		templateChoiceOption{Hint: "谨慎寡言，面对不公时却会冲动介入", IsCustom: true},
+		characterPOVOptions["third"],
+		"",
+	)
+	for _, required := range []string{
+		"故事场景（用户自定义，优先按原意采用）",
+		"涨潮就会改变街道布局",
+		"关系与基调（用户自定义，优先按原意采用）",
+		"互不信任但必须合作",
+		"角色性格（用户自定义，优先按原意采用）",
+		"面对不公时却会冲动介入",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt missing custom choice %q", required)
+		}
+	}
+}
+
+func TestResolveCharacterTemplateChoiceRejectsBlankCustomInput(t *testing.T) {
+	usePreset := false
+	_, err := resolveCharacterTemplateChoice(
+		"角色性格",
+		"不支持的角色性格",
+		"gentle",
+		"  ",
+		&usePreset,
+		characterPersonalityOptions,
+	)
+	if err == nil || !strings.Contains(err.Error(), "请填写自定义角色性格") {
+		t.Fatalf("expected blank custom input error, got %v", err)
+	}
+}
+
+func TestResolveCharacterTemplateChoiceKeepsLegacyPresetBehavior(t *testing.T) {
+	choice, err := resolveCharacterTemplateChoice(
+		"角色性格",
+		"不支持的角色性格",
+		"layered",
+		"旧客户端的性格补充",
+		nil,
+		characterPersonalityOptions,
+	)
+	if err != nil {
+		t.Fatalf("resolveCharacterTemplateChoice returned error: %v", err)
+	}
+	if choice.IsCustom || choice.Label != "矛盾混合" {
+		t.Fatalf("expected the legacy preset to win, got %+v", choice)
+	}
+}
+
 func TestLayeredPersonalityOptionIsAvailable(t *testing.T) {
 	option, ok := characterPersonalityOptions["layered"]
 	if !ok {

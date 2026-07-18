@@ -3,6 +3,7 @@ import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRi
          ChevronDown, ChevronUp, Pin, Globe, User } from 'lucide-react'
 import { useWorldBookStore, useCharacterStore, useUIStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
+import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
 
@@ -319,9 +320,10 @@ export default function WorldBooksPage() {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-1.5">状态栏样式 *</label>
-                  <textarea className="w-full input-base resize-none text-sm" rows={12}
+                  <ExpandableTextarea className="w-full input-base resize-none text-sm" rows={12}
                     value={entryForm.content}
                     onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
+                    editorTitle="状态栏样式"
                     placeholder="在此定义状态栏的字段与包裹样式" />
                 </div>
 
@@ -399,9 +401,10 @@ export default function WorldBooksPage() {
                 {/* 内容 */}
                 <div>
                   <label className="block text-xs text-gray-400 mb-1.5">注入内容 *</label>
-                  <textarea className="w-full input-base resize-none text-sm" rows={5}
+                  <ExpandableTextarea className="w-full input-base resize-none text-sm" rows={5}
                     value={entryForm.content}
                     onChange={e => setEntryForm(f => ({ ...f, content: e.target.value }))}
+                    editorTitle="世界书注入内容"
                     placeholder="当关键词命中时，此内容将被注入到上下文中" />
                 </div>
 
@@ -660,9 +663,10 @@ export default function WorldBooksPage() {
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">描述</label>
-            <textarea className="w-full input-base resize-none" rows={3}
+            <ExpandableTextarea className="w-full input-base resize-none" rows={3}
               value={newBookForm.description}
               onChange={e => setNewBookForm(f => ({ ...f, description: e.target.value }))}
+              editorTitle="世界书描述"
               placeholder="简短描述这个世界书的内容" />
           </div>
 

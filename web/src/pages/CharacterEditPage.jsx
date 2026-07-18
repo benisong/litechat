@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { Check, ChevronLeft, Save, Upload } from 'lucide-react'
 import { useAuthStore, useCharacterStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
+import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import {
   renderRolePlaceholders,
   resolveCharacterDisplayName,
@@ -169,11 +170,12 @@ export default function CharacterEditPage() {
               {config.label}
             </label>
             {config.type === 'textarea' ? (
-              <textarea
+              <ExpandableTextarea
                 value={form[key]}
                 onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                 placeholder={config.placeholder}
                 rows={config.rows}
+                editorTitle={config.label}
                 className="w-full input-base resize-none"
               />
             ) : config.type === 'select' ? (
@@ -254,11 +256,12 @@ export default function CharacterEditPage() {
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5 font-medium">用户详情</label>
-                <textarea
+                <ExpandableTextarea
                   value={form.user_detail || ''}
                   onChange={e => setForm(f => ({ ...f, user_detail: e.target.value }))}
                   placeholder="用户的背景设定、性格特征等"
                   rows={3}
+                  editorTitle="用户详情"
                   className="w-full input-base resize-none"
                 />
               </div>

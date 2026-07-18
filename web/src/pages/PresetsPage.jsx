@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { usePresetStore, useUIStore, useAuthStore, useSettingsStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
+import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
 import clsx from 'clsx'
 
@@ -444,11 +445,12 @@ export default function PresetsPage() {
                 未摘要有效文本达到该字数后才标记为需要摘要；摘要失败后至少间隔 10 个对话楼层再重试。
               </p>
               <label className="block text-xs text-gray-400">补充提示词</label>
-              <textarea
+              <ExpandableTextarea
                 className="w-full input-base resize-none text-sm"
                 rows={10}
                 value={memoryPrompt}
                 onChange={event => setMemoryPrompt(event.target.value)}
+                editorTitle="记忆摘要补充提示词"
                 placeholder="例如：更重视关系推进、未完成事项和用户明确表达过的偏好；重复寒暄可以强压缩。"
               />
               <p className="text-xs text-gray-500">
@@ -571,11 +573,12 @@ export default function PresetsPage() {
 
                       <div>
                         <label className="block text-[10px] text-gray-500 mb-1">内容</label>
-                        <textarea
+                        <ExpandableTextarea
                           className="w-full input-base text-xs resize-none py-2"
                           rows={5}
                           value={entry.content}
                           onChange={event => updateEntry(entry.id, 'content', event.target.value)}
+                          editorTitle={entry.name || '预设提示词内容'}
                           placeholder="支持变量：{{char}} {{description}} {{personality}} {{scenario}} {{user}}"
                         />
                       </div>

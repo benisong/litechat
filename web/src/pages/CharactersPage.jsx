@@ -13,6 +13,7 @@ import {
 import { useAuthStore, useCharacterStore, useChatStore, useUIStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import EmptyState from '../components/ui/EmptyState'
+import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
 import { renderRolePlaceholders } from '../utils/placeholderRender'
 
@@ -30,6 +31,10 @@ const STEPS = [
     key: 'setting',
     title: '选择故事场景',
     subtitle: 'ta 所在的世界，决定了你们能遇见的方式',
+    customInput: {
+      label: '自定义故事场景',
+      placeholder: '例如：一座每逢涨潮就会改变街道布局的海港城，居民依靠记录潮汐来维持日常生活。',
+    },
     options: [
       { value: 'city', label: '现代都市', desc: '当代城市成年人的生活：写字楼、街区、行业圈层' },
       { value: 'school', label: '校园青春', desc: '当代校园内的青春剧：同学、学长学姐、社团与考试' },
@@ -44,6 +49,10 @@ const STEPS = [
     key: 'type',
     title: '选择关系与基调',
     subtitle: 'ta 和你之间，最适合哪种情绪张力？',
+    customInput: {
+      label: '自定义关系与基调',
+      placeholder: '例如：两人是互不信任但必须合作的调查搭档，整体克制、悬疑，关系会随共同选择逐步变化。',
+    },
     options: [
       { value: 'pure', label: '心动暧昧', desc: '还没挑明的靠近：慢热、克制、舍不得打破平衡' },
       { value: 'unrequited', label: '求而不得', desc: '真实障碍与选择代价，而不只靠误会维持拉扯' },
@@ -57,6 +66,10 @@ const STEPS = [
     key: 'personality',
     title: '选择角色性格',
     subtitle: '选择一种倾向，AI 会补充情境变化与矛盾面',
+    customInput: {
+      label: '自定义角色性格',
+      placeholder: '例如：谨慎寡言，习惯先观察再行动；面对不公时却会冲动介入，事后愿意承担后果。',
+    },
     options: [
       { value: 'tsundere', label: '傲娇', desc: '只在特定情境嘴硬，也有坦率可靠的一面' },
       { value: 'gentle', label: '温柔', desc: '主动体贴但保有判断、疲惫和拒绝的边界' },
@@ -79,7 +92,25 @@ const STEPS = [
   },
 ]
 
-function buildGenerationRequest(choices, customPersonality) {
+const DEFAULT_PRESET_SELECTIONS = {
+  setting: 'city',
+  type: 'pure',
+  personality: 'tsundere',
+}
+
+const DEFAULT_PRESET_USAGE = {
+  setting: true,
+  type: true,
+  personality: true,
+}
+
+const EMPTY_CUSTOM_INPUTS = {
+  setting: '',
+  type: '',
+  personality: '',
+}
+
+function buildGenerationRequest(choices, usePresets, customInputs) {
   const [gender, setting, type, personality, pov] = choices
   return {
     gender,
@@ -87,13 +118,21 @@ function buildGenerationRequest(choices, customPersonality) {
     type,
     personality,
     pov,
-    custom_personality: customPersonality.trim(),
+    use_setting_preset: usePresets.setting,
+    use_type_preset: usePresets.type,
+    use_personality_preset: usePresets.personality,
+    custom_setting: usePresets.setting ? '' : customInputs.setting.trim(),
+    custom_type: usePresets.type ? '' : customInputs.type.trim(),
+    custom_personality: usePresets.personality ? '' : customInputs.personality.trim(),
   }
 }
 
-function getChoiceLabels(choices) {
+function getChoiceLabels(choices, usePresets) {
   return choices.map((value, index) => {
     const step = STEPS[index]
+    if (step?.customInput && usePresets[step.key] === false) {
+      return step.customInput.label
+    }
     return step?.options.find(option => option.value === value)?.label || value
   })
 }
@@ -110,9 +149,12 @@ export default function CharactersPage() {
   const [showTemplatePrompt, setShowTemplatePrompt] = useState(false)
   const [templateStep, setTemplateStep] = useState(-1)
   const [templateChoices, setTemplateChoices] = useState([])
-  const [customPersonality, setCustomPersonality] = useState('')
+  const [presetSelections, setPresetSelections] = useState({ ...DEFAULT_PRESET_SELECTIONS })
+  const [usePresets, setUsePresets] = useState({ ...DEFAULT_PRESET_USAGE })
+  const [customInputs, setCustomInputs] = useState({ ...EMPTY_CUSTOM_INPUTS })
   const [pendingGenerationChoices, setPendingGenerationChoices] = useState([])
-  const [pendingCustomPersonality, setPendingCustomPersonality] = useState('')
+  const [pendingPresetUsage, setPendingPresetUsage] = useState({ ...DEFAULT_PRESET_USAGE })
+  const [pendingCustomInputs, setPendingCustomInputs] = useState({ ...EMPTY_CUSTOM_INPUTS })
   const [generating, setGenerating] = useState(false)
 
   useEffect(() => {
@@ -120,8 +162,24 @@ export default function CharactersPage() {
   }, [])
 
   const currentStep = STEPS[templateStep]
-  const selectedLabels = useMemo(() => getChoiceLabels(templateChoices), [templateChoices])
-  const generatingLabels = useMemo(() => getChoiceLabels(pendingGenerationChoices), [pendingGenerationChoices])
+  const selectedLabels = useMemo(
+    () => getChoiceLabels(templateChoices, usePresets),
+    [templateChoices, usePresets]
+  )
+  const generatingLabels = useMemo(
+    () => getChoiceLabels(pendingGenerationChoices, pendingPresetUsage),
+    [pendingGenerationChoices, pendingPresetUsage]
+  )
+  const pendingCustomDetails = useMemo(
+    () => STEPS
+      .filter(step => step.customInput && pendingPresetUsage[step.key] === false)
+      .map(step => ({
+        key: step.key,
+        label: step.customInput.label,
+        value: pendingCustomInputs[step.key],
+      })),
+    [pendingCustomInputs, pendingPresetUsage]
+  )
 
   const handleChat = async (char, event) => {
     event.stopPropagation()
@@ -150,18 +208,37 @@ export default function CharactersPage() {
     setShowTemplatePrompt(false)
     setTemplateStep(-1)
     setTemplateChoices([])
-    setCustomPersonality('')
+    setPresetSelections({ ...DEFAULT_PRESET_SELECTIONS })
+    setUsePresets({ ...DEFAULT_PRESET_USAGE })
+    setCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
     setPendingGenerationChoices([])
-    setPendingCustomPersonality('')
+    setPendingPresetUsage({ ...DEFAULT_PRESET_USAGE })
+    setPendingCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
+    setGenerating(false)
+  }
+
+  const openTemplatePrompt = () => {
+    setShowTemplatePrompt(true)
+    setTemplateStep(-1)
+    setTemplateChoices([])
+    setPresetSelections({ ...DEFAULT_PRESET_SELECTIONS })
+    setUsePresets({ ...DEFAULT_PRESET_USAGE })
+    setCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
+    setPendingGenerationChoices([])
+    setPendingPresetUsage({ ...DEFAULT_PRESET_USAGE })
+    setPendingCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
     setGenerating(false)
   }
 
   const startTemplateFlow = () => {
     setShowTemplatePrompt(false)
     setTemplateChoices([])
-    setCustomPersonality('')
+    setPresetSelections({ ...DEFAULT_PRESET_SELECTIONS })
+    setUsePresets({ ...DEFAULT_PRESET_USAGE })
+    setCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
     setPendingGenerationChoices([])
-    setPendingCustomPersonality('')
+    setPendingPresetUsage({ ...DEFAULT_PRESET_USAGE })
+    setPendingCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
     setTemplateStep(0)
   }
 
@@ -178,20 +255,31 @@ export default function CharactersPage() {
     }
 
     setPendingGenerationChoices(nextChoices)
-    setPendingCustomPersonality(customPersonality)
+    setPendingPresetUsage({ ...usePresets })
+    setPendingCustomInputs({ ...customInputs })
     setGenerating(true)
     try {
-      const draft = await generateCharacterCard(buildGenerationRequest(nextChoices, customPersonality))
+      const draft = await generateCharacterCard(buildGenerationRequest(nextChoices, usePresets, customInputs))
       resetTemplateFlow()
       showToast('角色卡草稿已生成，请确认后保存', 'success')
       navigate('/characters/new', { state: { generatedDraft: draft } })
     } catch (err) {
       setPendingGenerationChoices([])
-      setPendingCustomPersonality('')
+      setPendingPresetUsage({ ...DEFAULT_PRESET_USAGE })
+      setPendingCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
       showToast(err.message || '角色卡生成失败，请重试', 'error')
     } finally {
       setGenerating(false)
     }
+  }
+
+  const handleCustomStepContinue = () => {
+    if (!currentStep?.customInput || generating) return
+    if (!usePresets[currentStep.key] && !customInputs[currentStep.key].trim()) {
+      showToast(`请填写${currentStep.customInput.label}`, 'error')
+      return
+    }
+    handleStepChoice(presetSelections[currentStep.key])
   }
 
   const handleStepBack = () => {
@@ -200,7 +288,8 @@ export default function CharactersPage() {
       setTemplateStep(-1)
       setTemplateChoices([])
       setPendingGenerationChoices([])
-      setPendingCustomPersonality('')
+      setPendingPresetUsage({ ...DEFAULT_PRESET_USAGE })
+      setPendingCustomInputs({ ...EMPTY_CUSTOM_INPUTS })
       setShowTemplatePrompt(true)
       return
     }
@@ -213,14 +302,7 @@ export default function CharactersPage() {
       <div className="px-4 pt-12 pb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">角色</h1>
         <button
-          onClick={() => {
-            setShowTemplatePrompt(true)
-            setTemplateStep(-1)
-            setTemplateChoices([])
-            setCustomPersonality('')
-            setPendingGenerationChoices([])
-            setPendingCustomPersonality('')
-          }}
+          onClick={openTemplatePrompt}
           className="btn-primary flex items-center gap-2 py-2 px-4 text-sm"
         >
           <Plus size={16} />
@@ -234,7 +316,7 @@ export default function CharactersPage() {
             icon={Users}
             title="还没有角色卡"
             description="创建你的第一个 AI 角色"
-            action={<button onClick={() => setShowTemplatePrompt(true)} className="btn-primary">创建角色</button>}
+            action={<button onClick={openTemplatePrompt} className="btn-primary">创建角色</button>}
           />
         ) : (
           <div className="grid grid-cols-2 gap-3 pb-4">
@@ -405,7 +487,7 @@ export default function CharactersPage() {
           <div className="text-center py-2">
             <Sparkles size={32} className="mx-auto mb-3 text-primary-400" />
             <p className="text-sm text-gray-300">想快速生成一张角色卡吗？</p>
-            <p className="text-xs text-gray-500 mt-1">先完成模板选择，再交给 AI 生成角色卡草稿</p>
+            <p className="text-xs text-gray-500 mt-1">选择预设或填写自定义方向，再交给 AI 生成角色卡草稿</p>
           </div>
           <div className="flex flex-col gap-3">
             <button onClick={startTemplateFlow} className="btn-primary w-full py-3 flex items-center justify-center gap-2">
@@ -437,7 +519,7 @@ export default function CharactersPage() {
             <Loader2 size={32} className="mx-auto text-primary-400 animate-spin" />
             <div>
               <p className="text-base font-medium text-gray-100">生成角色卡中，请等候</p>
-              <p className="text-sm text-gray-500 mt-2">AI 正在根据你的模板选项写角色卡</p>
+              <p className="text-sm text-gray-500 mt-2">AI 正在根据你的预设与自定义要求写角色卡</p>
             </div>
             {generatingLabels.length > 0 && (
               <div className="flex flex-wrap justify-center gap-2">
@@ -448,12 +530,12 @@ export default function CharactersPage() {
                 ))}
               </div>
             )}
-            {pendingCustomPersonality.trim() && (
-              <div className="rounded-xl border border-surface-border bg-surface/40 p-3 text-left">
-                <p className="text-xs text-gray-500 mb-1">性格补充要求</p>
-                <p className="text-sm text-gray-300 whitespace-pre-wrap">{pendingCustomPersonality}</p>
+            {pendingCustomDetails.map(detail => (
+              <div key={detail.key} className="rounded-xl border border-surface-border bg-surface/40 p-3 text-left">
+                <p className="text-xs text-gray-500 mb-1">{detail.label}</p>
+                <p className="text-sm text-gray-300 whitespace-pre-wrap">{detail.value}</p>
               </div>
-            )}
+            ))}
           </div>
         ) : currentStep ? (
           <div className="space-y-4">
@@ -484,30 +566,87 @@ export default function CharactersPage() {
               </div>
             )}
 
-            <div className={`gap-3 ${currentStep.options.length > 2 ? 'grid grid-cols-2' : 'flex flex-col'}`}>
-              {currentStep.options.map(option => (
-                <button
-                  key={option.value}
-                  onClick={() => handleStepChoice(option.value)}
-                  className="w-full text-left p-4 rounded-xl border border-surface-border hover:border-primary-500/50 hover:bg-primary-600/10 active:scale-[0.98] transition-all duration-150"
-                >
-                  <span className="text-base font-medium text-gray-200">{option.label}</span>
-                  <p className="text-xs text-gray-500 mt-1">{option.desc}</p>
-                </button>
-              ))}
-            </div>
+            {currentStep.customInput ? (
+              <div className="space-y-4 rounded-2xl border border-surface-border bg-surface/30 p-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor={`${currentStep.key}-preset`} className="text-sm font-medium text-gray-200">
+                      选择预设
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={usePresets[currentStep.key]}
+                        onChange={event => setUsePresets(current => ({
+                          ...current,
+                          [currentStep.key]: event.target.checked,
+                        }))}
+                        className="h-4 w-4 accent-primary-500"
+                      />
+                      使用预设
+                    </label>
+                  </div>
+                  <select
+                    id={`${currentStep.key}-preset`}
+                    value={presetSelections[currentStep.key]}
+                    onChange={event => setPresetSelections(current => ({
+                      ...current,
+                      [currentStep.key]: event.target.value,
+                    }))}
+                    disabled={!usePresets[currentStep.key]}
+                    className="input-base w-full bg-surface text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {currentStep.options.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  {usePresets[currentStep.key] && (
+                    <p className="text-xs leading-5 text-gray-500">
+                      {currentStep.options.find(option => option.value === presetSelections[currentStep.key])?.desc}
+                    </p>
+                  )}
+                </div>
 
-            {currentStep.key === 'personality' && (
-              <div className="rounded-xl border border-surface-border bg-surface/40 p-4 space-y-2">
-                <label className="block text-sm text-gray-200">性格补充要求</label>
-                <textarea
-                  value={customPersonality}
-                  onChange={e => setCustomPersonality(e.target.value)}
-                  rows={4}
-                  className="w-full input-base resize-none text-sm"
-                  placeholder="可选，例如：外冷内热、占有欲强、会吃醋、对用户有明显偏爱、说话带一点坏心思。这里写的内容会和你选择的基础性格一起发给 AI。"
-                />
-                <p className="text-xs text-gray-500">不填也可以，填了之后生成的人设会更贴近你的偏好。</p>
+                <div className="space-y-2">
+                  <label htmlFor={`${currentStep.key}-custom`} className="block text-sm font-medium text-gray-200">
+                    自定义输入
+                  </label>
+                  <ExpandableTextarea
+                    id={`${currentStep.key}-custom`}
+                    editorTitle={currentStep.customInput.label}
+                    value={customInputs[currentStep.key]}
+                    onChange={event => setCustomInputs(current => ({
+                      ...current,
+                      [currentStep.key]: event.target.value,
+                    }))}
+                    disabled={usePresets[currentStep.key]}
+                    rows={5}
+                    className="input-base w-full resize-none text-sm disabled:cursor-not-allowed disabled:bg-dark-200/60 disabled:text-gray-600"
+                    placeholder={currentStep.customInput.placeholder}
+                  />
+                  <p className="text-xs text-gray-500">
+                    {usePresets[currentStep.key]
+                      ? '取消勾选“使用预设”后即可填写自定义内容。'
+                      : '当前只采用自定义内容，不会同时叠加下拉框中的预设。'}
+                  </p>
+                </div>
+
+                <button onClick={handleCustomStepContinue} className="btn-primary w-full py-2.5 text-sm">
+                  下一步
+                </button>
+              </div>
+            ) : (
+              <div className={`gap-3 ${currentStep.options.length > 2 ? 'grid grid-cols-2' : 'flex flex-col'}`}>
+                {currentStep.options.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => handleStepChoice(option.value)}
+                    className="w-full text-left p-4 rounded-xl border border-surface-border hover:border-primary-500/50 hover:bg-primary-600/10 active:scale-[0.98] transition-all duration-150"
+                  >
+                    <span className="text-base font-medium text-gray-200">{option.label}</span>
+                    <p className="text-xs text-gray-500 mt-1">{option.desc}</p>
+                  </button>
+                ))}
               </div>
             )}
 

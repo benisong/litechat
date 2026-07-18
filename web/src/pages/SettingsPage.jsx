@@ -17,6 +17,7 @@ import {
 import { useSettingsStore, useUIStore, useAuthStore, getToken } from '../store'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
+import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 
 const PRESET_ENDPOINTS = [
   { label: 'OpenAI', value: 'https://api.openai.com/v1' },
@@ -478,11 +479,12 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs text-gray-400">用户详情</label>
-                <textarea
+                <ExpandableTextarea
                   className="input-base w-full resize-none text-sm"
                   rows={3}
                   value={profileForm.user_detail}
                   onChange={e => setProfileForm(f => ({ ...f, user_detail: e.target.value }))}
+                  editorTitle="用户详情"
                   placeholder="你的背景设定、性格特征等"
                 />
               </div>
