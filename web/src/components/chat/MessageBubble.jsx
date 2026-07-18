@@ -3,29 +3,12 @@ import clsx from 'clsx'
 import Avatar from '../ui/Avatar'
 import MessageContent from './MessageContent'
 import Modal from '../ui/Modal'
+import { splitStatusBar } from '../../utils/statusBar'
 import { Trash2, Copy, Check, RefreshCw, ChevronDown, ChevronRight, Activity } from 'lucide-react'
 
 function formatDurationSeconds(seconds) {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
   return `${seconds.toFixed(1)}s`
-}
-
-// 从 AI 回复中切出状态栏部分。以「【状态栏】」标题为锚点：
-// 标题之前为正文，标题及之后为状态栏块。顺带剥掉残留的 ``` 或 ''' 代码块围栏行。
-function splitStatusBar(content) {
-  if (typeof content !== 'string') return { body: content, statusBar: null }
-  const idx = content.lastIndexOf('【状态栏】')
-  if (idx === -1) return { body: content, statusBar: null }
-  // 向上回溯到该行行首，连同可能的围栏行一起划入状态栏块
-  let start = content.lastIndexOf('\n', idx - 1)
-  start = start === -1 ? 0 : start + 1
-  // 若状态栏前一行是 ``` 或 ''' 围栏，把它也并进去（一并剥离）
-  let bodyEnd = start
-  const body = content.slice(0, bodyEnd)
-  let statusBar = content.slice(bodyEnd)
-  // 去掉围栏标记行（``` 或 '''）
-  statusBar = statusBar.replace(/^[ \t]*(?:```|''')[^\n]*\n?/gm, '').trim()
-  return { body: body.replace(/[ \t]*(?:```|''')[^\n]*\n?$/g, '').trimEnd(), statusBar }
 }
 
 export default function MessageBubble({ message, character, statusBarStyle, onRegenerate, onRetry, onDeleteCascade }) {
@@ -91,10 +74,6 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
             ) : (
               <>
                 {(() => {
-                  // 流式输出过程中不拆分，避免状态栏闪烁；输出完成后再折叠
-                  if (isStreaming) {
-                    return <MessageContent content={message.content} isUser={false} />
-                  }
                   const sbBg = statusBarStyle?.bg || ''
                   const sbFg = statusBarStyle?.fg || ''
                   const sbBlockStyle = sbBg ? { backgroundColor: sbBg, borderColor: sbBg } : undefined

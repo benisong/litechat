@@ -90,10 +90,12 @@ func main() {
 					cleanPath = "index.html"
 				}
 				if _, err := distFS.Open(cleanPath); err == nil {
+					setWebCacheHeaders(c, cleanPath)
 					fileServer.ServeHTTP(c.Writer, c.Request)
 					return
 				}
 				// SPA 路由：返回 index.html
+				setWebCacheHeaders(c, "index.html")
 				c.Request.URL.Path = "/"
 				fileServer.ServeHTTP(c.Writer, c.Request)
 			}
@@ -107,5 +109,20 @@ func main() {
 	log.Printf("LiteChat 启动于 http://localhost:%s", port)
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
+	}
+}
+
+func setWebCacheHeaders(c *gin.Context, path string) {
+	if path == "index.html" || path == "sw.js" || path == "manifest.webmanifest" {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		if path == "sw.js" {
+			c.Header("Service-Worker-Allowed", "/")
+		}
+		return
+	}
+	if strings.HasPrefix(path, "assets/") {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	}
 }

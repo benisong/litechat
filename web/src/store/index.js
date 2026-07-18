@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { normalizeChatMessages } from '../utils/statusBar'
 
 // ===== API 工具函数 =====
 const BASE = '/api'
@@ -229,7 +230,7 @@ export const useChatStore = create((set, get) => ({
     set({ loading: true })
     try {
       const data = await apiFetch(`/chats/${chatId}/messages`)
-      set({ messages: data || [] })
+      set({ messages: normalizeChatMessages(data) })
     } finally {
       set({ loading: false })
     }
@@ -323,16 +324,13 @@ export const useChatStore = create((set, get) => ({
       // 流式结束，刷新消息列表
       const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
       const responseTimeSeconds = Math.max(0, (Date.now() - requestStartedAt) / 1000)
-      const lastAssistantIndex = Array.isArray(freshMessages)
-        ? [...freshMessages].map(m => m.role).lastIndexOf('assistant')
-        : -1
-      const hydratedMessages = Array.isArray(freshMessages)
-        ? freshMessages.map((message, index) => (
+      const normalizedMessages = normalizeChatMessages(freshMessages, fullContent)
+      const lastAssistantIndex = normalizedMessages.map(m => m.role).lastIndexOf('assistant')
+      const hydratedMessages = normalizedMessages.map((message, index) => (
             index === lastAssistantIndex
               ? { ...message, response_time_seconds: responseTimeSeconds }
               : message
           ))
-        : []
       set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
       set(s => ({
@@ -359,7 +357,7 @@ export const useChatStore = create((set, get) => ({
     await apiFetch(`/chats/${chatId}/messages/${msgId}`, { method: 'DELETE' })
     // 刷新消息列表
     const data = await apiFetch(`/chats/${chatId}/messages`)
-    set({ messages: data || [] })
+    set({ messages: normalizeChatMessages(data) })
   },
 
   // 重新生成：后端删除最后一条 AI 回复并重新请求（不重复发送用户消息）
@@ -432,16 +430,13 @@ export const useChatStore = create((set, get) => ({
 
       const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
       const responseTimeSeconds = Math.max(0, (Date.now() - requestStartedAt) / 1000)
-      const lastAssistantIndex = Array.isArray(freshMessages)
-        ? [...freshMessages].map(m => m.role).lastIndexOf('assistant')
-        : -1
-      const hydratedMessages = Array.isArray(freshMessages)
-        ? freshMessages.map((message, index) => (
+      const normalizedMessages = normalizeChatMessages(freshMessages, fullContent)
+      const lastAssistantIndex = normalizedMessages.map(m => m.role).lastIndexOf('assistant')
+      const hydratedMessages = normalizedMessages.map((message, index) => (
             index === lastAssistantIndex
               ? { ...message, response_time_seconds: responseTimeSeconds }
               : message
           ))
-        : []
       set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
       set(s => ({
