@@ -1,5 +1,12 @@
 /* 浅色模式覆盖 — 放在 public 目录不经过 PostCSS 处理，!important 保留 */
 
+html.light {
+  --status-bar-bg: #eef4e8;
+  --status-bar-fg: #3f5948;
+  --status-bar-border: #cad8c1;
+  --status-bar-hover: rgba(63, 89, 72, 0.07);
+}
+
 /* 背景 */
 html.light body                     { background-color: #f8f9fa !important; color: #212529 !important; }
 html.light .bg-dark-400             { background-color: #f8f9fa !important; }

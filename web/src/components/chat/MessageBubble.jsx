@@ -104,13 +104,12 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
                       <MessageContent content={bodyContent} isUser={false} />
                       {statusBarContent && (
                         <div
-                          className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.04] overflow-hidden"
+                          className="status-bar-panel mt-2 overflow-hidden rounded-lg border"
                           style={sbBlockStyle}>
                           <button
                             onClick={(e) => { e.stopPropagation(); setStatusOpen(o => !o) }}
                             style={sbTextStyle}
-                            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium
-                                       text-cyan-300/90 hover:bg-black/10 transition-colors select-none">
+                            className="status-bar-text status-bar-toggle flex w-full select-none items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium transition-colors">
                             <Activity size={12} />
                             <span>状态栏</span>
                             <span className="ml-auto">
@@ -120,8 +119,7 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
                           {statusOpen && (
                             <pre
                               style={sbTextStyle}
-                              className="px-3 py-2 text-[12px] leading-relaxed text-cyan-100/90
-                                            font-mono whitespace-pre-wrap break-words border-t border-cyan-500/15">
+                              className="status-bar-text status-bar-divider whitespace-pre-wrap break-words border-t px-3 py-2 font-mono text-[12px] leading-relaxed">
                               {statusBarContent}
                             </pre>
                           )}

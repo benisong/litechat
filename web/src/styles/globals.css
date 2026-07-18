@@ -5,6 +5,11 @@
 :root {
   /* 聊天消息字号，可在设置页调节（默认 0.875rem ≈ 14px） */
   --chat-font-size: 0.875rem;
+  /* 状态栏留空配色时使用的暗色主题护眼色 */
+  --status-bar-bg: #1b302a;
+  --status-bar-fg: #c9ded0;
+  --status-bar-border: #365248;
+  --status-bar-hover: rgba(201, 222, 208, 0.06);
 }
 
 @layer base {
@@ -87,6 +92,21 @@
 /* 聊天消息文字字号（跟随设置页的“聊天字号”，markdown 内容继承本字号） */
 .chat-text {
   font-size: var(--chat-font-size, 0.875rem);
+}
+
+/* 状态栏默认配色由主题变量控制；用户保存的内联颜色仍拥有更高优先级。 */
+.status-bar-panel {
+  background-color: var(--status-bar-bg);
+  border-color: var(--status-bar-border);
+}
+.status-bar-text {
+  color: var(--status-bar-fg);
+}
+.status-bar-toggle:hover {
+  background-color: var(--status-bar-hover);
+}
+.status-bar-divider {
+  border-color: var(--status-bar-border);
 }
 
 /* 打字动画光标 */

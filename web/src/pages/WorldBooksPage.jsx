@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { BookOpen, Plus, Trash2, ChevronRight, ChevronLeft, ToggleLeft, ToggleRight,
          ChevronDown, ChevronUp, Pin, Globe, User } from 'lucide-react'
-import { useWorldBookStore, useCharacterStore, useUIStore } from '../store'
+import { useWorldBookStore, useCharacterStore, useSettingsStore, useUIStore } from '../store'
 import EmptyState from '../components/ui/EmptyState'
 import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
@@ -31,14 +31,19 @@ const DEFAULT_ENTRY = {
   case_sensitive: false, order: 100, role: 'system', bg_color: '', font_color: '',
 }
 
-// 状态栏配色默认值（仅用于取色器的初始显示，留空表示沿用聊天界面默认主题）
-const STATUS_BAR_PICKER_BG = '#0b3a4a'
-const STATUS_BAR_PICKER_FG = '#a5f3fc'
+// 留空表示自动跟随主题；取色器需要实际色值，因此复用对应主题的护眼色。
+const STATUS_BAR_THEME_COLORS = {
+  dark: { bg: '#1b302a', fg: '#c9ded0' },
+  light: { bg: '#eef4e8', fg: '#3f5948' },
+}
 
 export default function WorldBooksPage() {
   const { worldBooks, currentBook, fetchWorldBooks, createWorldBook, deleteWorldBook,
           fetchWorldBook, createEntry, updateEntry, deleteEntry, fetchEntryTemplates } = useWorldBookStore()
   const { showToast } = useUIStore()
+  const theme = useSettingsStore(state => state.settings.theme)
+  const statusBarTheme = theme === 'light' ? 'light' : 'dark'
+  const statusBarDefaultColors = STATUS_BAR_THEME_COLORS[statusBarTheme]
 
   const { characters, fetchCharacters } = useCharacterStore()
 
@@ -335,7 +340,7 @@ export default function WorldBooksPage() {
                       type="button"
                       onClick={() => setEntryForm(f => ({ ...f, bg_color: '', font_color: '' }))}
                       className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors">
-                      恢复默认
+                      跟随主题
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -343,26 +348,26 @@ export default function WorldBooksPage() {
                       <span className="block text-[10px] text-gray-500 mb-1">背景色</span>
                       <div className="flex items-center gap-2">
                         <input type="color"
-                          value={entryForm.bg_color || STATUS_BAR_PICKER_BG}
+                          value={entryForm.bg_color || statusBarDefaultColors.bg}
                           onChange={e => setEntryForm(f => ({ ...f, bg_color: e.target.value }))}
                           className="h-8 w-10 rounded cursor-pointer bg-transparent border border-surface-border p-0.5" />
-                        <span className="text-[11px] text-gray-500">{entryForm.bg_color || '默认'}</span>
+                        <span className="text-[11px] text-gray-500">{entryForm.bg_color || '跟随主题'}</span>
                       </div>
                     </div>
                     <div>
                       <span className="block text-[10px] text-gray-500 mb-1">字体色</span>
                       <div className="flex items-center gap-2">
                         <input type="color"
-                          value={entryForm.font_color || STATUS_BAR_PICKER_FG}
+                          value={entryForm.font_color || statusBarDefaultColors.fg}
                           onChange={e => setEntryForm(f => ({ ...f, font_color: e.target.value }))}
                           className="h-8 w-10 rounded cursor-pointer bg-transparent border border-surface-border p-0.5" />
-                        <span className="text-[11px] text-gray-500">{entryForm.font_color || '默认'}</span>
+                        <span className="text-[11px] text-gray-500">{entryForm.font_color || '跟随主题'}</span>
                       </div>
                     </div>
                   </div>
                   <div>
                     <span className="block text-[10px] text-gray-500 mb-1">预览</span>
-                    <pre className="px-3 py-2 rounded-lg text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words border border-surface-border"
+                    <pre className="status-bar-panel status-bar-text px-3 py-2 rounded-lg text-[12px] leading-relaxed font-mono whitespace-pre-wrap break-words border"
                       style={{
                         backgroundColor: entryForm.bg_color || undefined,
                         color: entryForm.font_color || undefined,
