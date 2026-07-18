@@ -695,6 +695,7 @@ func (h *Handlers) DeleteChat(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.messageStore.InvalidateLatestAssistant(chatID)
 	if h.summaryService != nil {
 		h.summaryService.DeleteChatDataAsync(chatID)
 	}

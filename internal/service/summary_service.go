@@ -241,7 +241,7 @@ func (s *SummaryService) FinishTurnSummaryAsync(chatID string, previousStage <-c
 		if previousStage != nil {
 			<-previousStage
 		}
-		history, err := s.messageStore.ListByChatID(chatID)
+		history, err := s.messageStore.ListForContext(chatID)
 		if err != nil {
 			log.Printf("[summary] 后台读取最新历史失败 chat=%s: %v", chatID, err)
 			return
@@ -718,6 +718,9 @@ func (s *SummaryService) InvalidateFromSeq(chatID string, fromSeq int) error {
 func (s *SummaryService) DeleteMessageAndRecalculate(chatID, messageID string, cascade bool) (int64, error) {
 	s.evictRuntimeCache(chatID)
 	deleted, err := s.summaryStore.DeleteMessageAndRecalculate(chatID, messageID, cascade, s.summaryCharLimit())
+	if err == nil {
+		s.messageStore.InvalidateLatestAssistant(chatID)
+	}
 	s.refreshRuntimeCacheAsync(chatID)
 	return deleted, err
 }

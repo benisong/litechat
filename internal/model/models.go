@@ -60,19 +60,9 @@ type Message struct {
 	Seq       int       `json:"seq" db:"seq"`
 	Role      string    `json:"role" db:"role"`
 	Content   string    `json:"content" db:"content"`
-	StatusBar string    `json:"status_bar,omitempty" db:"-"`
+	StatusBar string    `json:"status_bar,omitempty" db:"status_bar"`
 	Tokens    int       `json:"tokens" db:"tokens"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
-}
-
-// MessageStatusBar stores the separately persisted status panel for one assistant message.
-type MessageStatusBar struct {
-	MessageID  string    `json:"message_id" db:"message_id"`
-	ChatID     string    `json:"chat_id" db:"chat_id"`
-	MessageSeq int       `json:"message_seq" db:"message_seq"`
-	Content    string    `json:"content" db:"content"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // Preset 预设（系统提示词模板）

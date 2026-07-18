@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，无需 CGO
 )
@@ -143,21 +142,10 @@ func (db *DB) InitSchema() error {
 		seq        INTEGER DEFAULT 0,
 		role       TEXT NOT NULL,
 		content    TEXT NOT NULL,
+		status_bar TEXT NOT NULL DEFAULT '',
 		tokens     INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-
-	-- Assistant status panels are stored separately so they never enter chat history or summaries.
-	CREATE TABLE IF NOT EXISTS message_status_bars (
-		message_id  TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-		chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-		message_seq INTEGER NOT NULL,
-		content     TEXT NOT NULL,
-		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_message_status_bars_chat_seq ON message_status_bars(chat_id, message_seq);
 
 
 	CREATE TABLE IF NOT EXISTS chat_summary_state (
@@ -257,6 +245,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE messages ADD COLUMN seq INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE messages ADD COLUMN status_bar TEXT NOT NULL DEFAULT ''`)
 	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_to_seq INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_status TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_run_id TEXT DEFAULT ''`)
@@ -293,7 +282,7 @@ func (db *DB) InitSchema() error {
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq)`); err != nil {
 		return fmt.Errorf("创建消息顺序索引失败: %w", err)
 	}
-	if err := db.migrateLegacyStatusBars(); err != nil {
+	if err := db.migrateMessageStatusBars(); err != nil {
 		return fmt.Errorf("迁移历史状态栏失败: %w", err)
 	}
 
@@ -301,16 +290,45 @@ func (db *DB) InitSchema() error {
 	return nil
 }
 
-func (db *DB) migrateLegacyStatusBars() error {
+func (db *DB) migrateMessageStatusBars() error {
+	var legacyTableCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'message_status_bars'`).Scan(&legacyTableCount); err != nil {
+		return err
+	}
+	if legacyTableCount > 0 {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.Exec(`
+			UPDATE messages
+			SET status_bar = (
+				SELECT content FROM message_status_bars WHERE message_id = messages.id
+			)
+			WHERE TRIM(COALESCE(status_bar, '')) = ''
+			  AND EXISTS (
+				SELECT 1 FROM message_status_bars WHERE message_id = messages.id
+			  )`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DROP TABLE message_status_bars`); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
 	type legacyMessage struct {
 		id      string
-		chatID  string
-		seq     int
 		content string
 	}
 
 	rows, err := db.Query(`
-		SELECT id, chat_id, seq, content
+		SELECT id, content
 		FROM messages
 		WHERE role = 'assistant' AND instr(content, ?) > 0`, statusbar.Marker)
 	if err != nil {
@@ -319,7 +337,7 @@ func (db *DB) migrateLegacyStatusBars() error {
 	var legacy []legacyMessage
 	for rows.Next() {
 		var message legacyMessage
-		if err := rows.Scan(&message.id, &message.chatID, &message.seq, &message.content); err != nil {
+		if err := rows.Scan(&message.id, &message.content); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -337,24 +355,16 @@ func (db *DB) migrateLegacyStatusBars() error {
 		return err
 	}
 	defer tx.Rollback()
-	now := time.Now()
 	for _, message := range legacy {
 		body, panel := statusbar.Split(message.content)
 		if panel == "" {
 			continue
 		}
-		if _, err := tx.Exec(`UPDATE messages SET content = ? WHERE id = ?`, body, message.id); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(`
-			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT(message_id) DO UPDATE SET
-				chat_id = excluded.chat_id,
-				message_seq = excluded.message_seq,
-				content = excluded.content,
-				updated_at = excluded.updated_at`,
-			message.id, message.chatID, message.seq, panel, now, now); err != nil {
+			UPDATE messages
+			SET content = ?,
+				status_bar = CASE WHEN TRIM(COALESCE(status_bar, '')) = '' THEN ? ELSE status_bar END
+			WHERE id = ?`, body, panel, message.id); err != nil {
 			return err
 		}
 	}

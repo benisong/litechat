@@ -115,7 +115,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		preset.Name, preset.ID, preset.UserID, hasPrompts, len(preset.Prompts))
 
 	// 读取该会话的历史消息
-	history, err := s.messageStore.ListByChatID(chatID)
+	history, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("读取历史消息失败: %w", err)
 	}
@@ -203,7 +203,7 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 // Regenerate 重新生成最后一条 AI 回复：删除旧回复，用同一条用户输入重新请求模型。
 func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback) (string, error) {
 	// 读取全部消息
-	allMessages, err := s.messageStore.ListByChatID(chatID)
+	allMessages, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load messages: %w", err)
 	}
@@ -263,7 +263,7 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 	preset := s.loadPreset(chat.PresetID, "", userID)
 
 	// 读取历史消息（用于重建上下文）
-	history, err := s.messageStore.ListByChatID(chatID)
+	history, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("读取历史消息失败: %w", err)
 	}
@@ -308,7 +308,7 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 // RetryLastOrRegenerate 在“重试”和“重新生成”之间自动选择：
 // 末尾是 AI 回复就重新生成；末尾是用户消息就直接用它再请求一次。
 func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback StreamCallback) (string, error) {
-	allMessages, err := s.messageStore.ListByChatID(chatID)
+	allMessages, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load messages: %w", err)
 	}
@@ -338,7 +338,7 @@ func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback Stre
 
 	preset := s.loadPreset(chat.PresetID, "", userID)
 
-	history, err := s.messageStore.ListByChatID(chatID)
+	history, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("读取历史消息失败: %w", err)
 	}

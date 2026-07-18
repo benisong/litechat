@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestMessageStorePersistsStatusBarSeparately(t *testing.T) {
+func TestMessageStorePersistsStatusBarOnMessageRow(t *testing.T) {
 	db, chatID := newMessageStoreTestDB(t)
 	messageStore := NewMessageStore(db)
 	combined := "她轻轻点头。\n\n'''\n【状态栏】\n地点：图书馆\n关系：信任\n'''"
@@ -18,16 +18,12 @@ func TestMessageStorePersistsStatusBarSeparately(t *testing.T) {
 		t.Fatalf("message was not split in memory: %+v", message)
 	}
 
-	var storedBody string
-	if err := db.QueryRow(`SELECT content FROM messages WHERE id = ?`, message.ID).Scan(&storedBody); err != nil {
+	var storedBody, storedPanel string
+	if err := db.QueryRow(`SELECT content, status_bar FROM messages WHERE id = ?`, message.ID).Scan(&storedBody, &storedPanel); err != nil {
 		t.Fatalf("read stored body: %v", err)
 	}
 	if storedBody != "她轻轻点头。" || strings.Contains(storedBody, "状态栏") {
 		t.Fatalf("status bar leaked into messages.content: %q", storedBody)
-	}
-	var storedPanel string
-	if err := db.QueryRow(`SELECT content FROM message_status_bars WHERE message_id = ?`, message.ID).Scan(&storedPanel); err != nil {
-		t.Fatalf("read stored panel: %v", err)
 	}
 	if storedPanel != message.StatusBar {
 		t.Fatalf("unexpected stored panel: %q", storedPanel)
@@ -44,12 +40,57 @@ func TestMessageStorePersistsStatusBarSeparately(t *testing.T) {
 	if err := messageStore.DeleteByID(message.ID); err != nil {
 		t.Fatalf("delete message: %v", err)
 	}
-	var panelCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM message_status_bars WHERE message_id = ?`, message.ID).Scan(&panelCount); err != nil {
-		t.Fatalf("count panels after delete: %v", err)
+	var messageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE id = ?`, message.ID).Scan(&messageCount); err != nil {
+		t.Fatalf("count messages after delete: %v", err)
 	}
-	if panelCount != 0 {
-		t.Fatalf("status panel did not cascade with message: %d", panelCount)
+	if messageCount != 0 {
+		t.Fatalf("message row was not deleted: %d", messageCount)
+	}
+	messages, err := messageStore.ListForContext(chatID)
+	if err != nil {
+		t.Fatalf("list context after delete: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("deleted assistant remained in cache: %+v", messages)
+	}
+}
+
+func TestListForContextUsesCachedLatestAssistant(t *testing.T) {
+	db, chatID := newMessageStoreTestDB(t)
+	messageStore := NewMessageStore(db)
+	userMessage := &model.Message{ChatID: chatID, Role: "user", Content: "hello"}
+	if err := messageStore.Create(userMessage); err != nil {
+		t.Fatalf("create user message: %v", err)
+	}
+	assistant := &model.Message{
+		ChatID:  chatID,
+		Role:    "assistant",
+		Content: "cached body\n\n【状态栏】\n地点：缓存地点",
+	}
+	if err := messageStore.Create(assistant); err != nil {
+		t.Fatalf("create assistant message: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE messages SET content = 'database body' WHERE id = ?`, assistant.ID); err != nil {
+		t.Fatalf("change stored assistant for cache assertion: %v", err)
+	}
+
+	messages, err := messageStore.ListForContext(chatID)
+	if err != nil {
+		t.Fatalf("list context: %v", err)
+	}
+	if len(messages) != 2 || messages[1].Content != "cached body" {
+		t.Fatalf("latest assistant was not supplied by cache: %+v", messages)
+	}
+	if !strings.Contains(messages[1].StatusBar, "缓存地点") {
+		t.Fatalf("cached status bar missing: %+v", messages[1])
+	}
+	rangeMessages, err := messageStore.ListByChatIDRange(chatID, assistant.Seq, assistant.Seq)
+	if err != nil {
+		t.Fatalf("list summary range: %v", err)
+	}
+	if len(rangeMessages) != 1 || rangeMessages[0].Content != "cached body" {
+		t.Fatalf("summary range did not use cached assistant: %+v", rangeMessages)
 	}
 }
 

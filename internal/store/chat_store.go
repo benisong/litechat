@@ -5,6 +5,7 @@ import (
 	"litechat/internal/model"
 	"litechat/internal/statusbar"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -140,15 +141,23 @@ func (s *ChatStore) Touch(id string, userID string) error {
 
 // MessageStore 消息数据操作
 type MessageStore struct {
-	db *DB
+	db              *DB
+	cacheMu         sync.RWMutex
+	latestAssistant map[string]*model.Message
 }
 
 func NewMessageStore(db *DB) *MessageStore {
-	return &MessageStore{db: db}
+	return &MessageStore{
+		db:              db,
+		latestAssistant: make(map[string]*model.Message),
+	}
 }
 
 const messageColumnsWithStatus = `
-	m.id, m.chat_id, m.seq, m.role, m.content, COALESCE(sb.content, ''), m.tokens, m.created_at`
+	m.id, m.chat_id, m.seq, m.role, m.content, m.status_bar, m.tokens, m.created_at`
+
+const messageColumnsWithoutStatus = `
+	m.id, m.chat_id, m.seq, m.role, m.content, '', m.tokens, m.created_at`
 
 type messageScanner interface {
 	Scan(dest ...any) error
@@ -158,6 +167,63 @@ func scanMessage(scanner messageScanner, msg *model.Message) error {
 	return scanner.Scan(
 		&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.StatusBar, &msg.Tokens, &msg.CreatedAt,
 	)
+}
+
+func cloneMessage(msg *model.Message) *model.Message {
+	if msg == nil {
+		return nil
+	}
+	copy := *msg
+	return &copy
+}
+
+func (s *MessageStore) cacheLatestAssistantMessage(msg *model.Message) {
+	if msg == nil || msg.Role != "assistant" {
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	current := s.latestAssistant[msg.ChatID]
+	if current == nil || msg.Seq >= current.Seq {
+		s.latestAssistant[msg.ChatID] = cloneMessage(msg)
+	}
+}
+
+func (s *MessageStore) cachedLatestAssistant(chatID string) *model.Message {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
+	return cloneMessage(s.latestAssistant[chatID])
+}
+
+func (s *MessageStore) InvalidateLatestAssistant(chatID string) {
+	s.cacheMu.Lock()
+	delete(s.latestAssistant, chatID)
+	s.cacheMu.Unlock()
+}
+
+func (s *MessageStore) invalidateAssistantByID(id string) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	for chatID, message := range s.latestAssistant {
+		if message.ID == id {
+			delete(s.latestAssistant, chatID)
+			return
+		}
+	}
+}
+
+func insertMessageBySeq(messages []*model.Message, message *model.Message) []*model.Message {
+	if message == nil {
+		return messages
+	}
+	messages = append(messages, nil)
+	i := len(messages) - 1
+	for i > 0 && messages[i-1].Seq > message.Seq {
+		messages[i] = messages[i-1]
+		i--
+	}
+	messages[i] = cloneMessage(message)
+	return messages
 }
 
 // Create 创建消息
@@ -186,22 +252,17 @@ func (s *MessageStore) Create(msg *model.Message) error {
 	}
 
 	if _, err := tx.Exec(`
-		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ChatID, msg.Seq, msg.Role, msg.Content, msg.Tokens, msg.CreatedAt,
+		INSERT INTO messages (id, chat_id, seq, role, content, status_bar, tokens, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.ChatID, msg.Seq, msg.Role, msg.Content, msg.StatusBar, msg.Tokens, msg.CreatedAt,
 	); err != nil {
 		return err
 	}
-	if msg.StatusBar != "" {
-		if _, err := tx.Exec(`
-			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			msg.ID, msg.ChatID, msg.Seq, msg.StatusBar, msg.CreatedAt, msg.CreatedAt); err != nil {
-			return err
-		}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-
-	return tx.Commit()
+	s.cacheLatestAssistantMessage(msg)
+	return nil
 }
 
 // ListByChatID 查询对话的所有消息
@@ -209,7 +270,6 @@ func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 	rows, err := s.db.Query(`
 		SELECT `+messageColumnsWithStatus+`
 		FROM messages m
-		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
 		WHERE m.chat_id = ?
 		ORDER BY m.seq ASC, m.created_at ASC`, chatID)
 	if err != nil {
@@ -225,17 +285,78 @@ func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 		}
 		list = append(list, msg)
 	}
-	return list, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := len(list) - 1; i >= 0; i-- {
+		if list[i].Role == "assistant" {
+			s.cacheLatestAssistantMessage(list[i])
+			break
+		}
+	}
+	return list, nil
+}
+
+// ListForContext reads previous messages from SQLite and supplies the latest
+// assistant reply from the write-through cache.
+func (s *MessageStore) ListForContext(chatID string) ([]*model.Message, error) {
+	latest := s.cachedLatestAssistant(chatID)
+	if latest == nil {
+		messages, err := s.ListByChatID(chatID)
+		if err != nil {
+			return nil, err
+		}
+		latest = s.cachedLatestAssistant(chatID)
+		for _, message := range messages {
+			if latest == nil || message.ID != latest.ID {
+				message.StatusBar = ""
+			}
+		}
+		return messages, nil
+	}
+
+	rows, err := s.db.Query(`
+		SELECT `+messageColumnsWithoutStatus+`
+		FROM messages m
+		WHERE m.chat_id = ? AND m.id <> ?
+		ORDER BY m.seq ASC, m.created_at ASC`, chatID, latest.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []*model.Message
+	for rows.Next() {
+		message := &model.Message{}
+		if err := scanMessage(rows, message); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return insertMessageBySeq(messages, latest), nil
 }
 
 // ListByChatIDRange 查询对话中指定范围的消息
 func (s *MessageStore) ListByChatIDRange(chatID string, fromSeq, toSeq int) ([]*model.Message, error) {
-	rows, err := s.db.Query(`
-		SELECT `+messageColumnsWithStatus+`
-		FROM messages m
-		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
-		WHERE m.chat_id = ? AND m.seq >= ? AND m.seq <= ?
-		ORDER BY m.seq ASC, m.created_at ASC`, chatID, fromSeq, toSeq)
+	latest := s.cachedLatestAssistant(chatID)
+	var rows *sql.Rows
+	var err error
+	if latest != nil && latest.Seq >= fromSeq && latest.Seq <= toSeq {
+		rows, err = s.db.Query(`
+			SELECT `+messageColumnsWithoutStatus+`
+			FROM messages m
+			WHERE m.chat_id = ? AND m.seq >= ? AND m.seq <= ? AND m.id <> ?
+			ORDER BY m.seq ASC, m.created_at ASC`, chatID, fromSeq, toSeq, latest.ID)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT `+messageColumnsWithoutStatus+`
+			FROM messages m
+			WHERE m.chat_id = ? AND m.seq >= ? AND m.seq <= ?
+			ORDER BY m.seq ASC, m.created_at ASC`, chatID, fromSeq, toSeq)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +370,13 @@ func (s *MessageStore) ListByChatIDRange(chatID string, fromSeq, toSeq int) ([]*
 		}
 		list = append(list, msg)
 	}
-	return list, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if latest != nil && latest.Seq >= fromSeq && latest.Seq <= toSeq {
+		list = insertMessageBySeq(list, latest)
+	}
+	return list, nil
 }
 
 // GetByID 查询单条消息
@@ -258,7 +385,6 @@ func (s *MessageStore) GetByID(id string) (*model.Message, error) {
 	row := s.db.QueryRow(`
 		SELECT `+messageColumnsWithStatus+`
 		FROM messages m
-		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
 		WHERE m.id = ?`, id)
 	err := scanMessage(row, msg)
 	if err != nil {
@@ -321,6 +447,9 @@ func (s *MessageStore) LatestUserSeq(chatID string) (int, error) {
 // DeleteByID 删除单条消息
 func (s *MessageStore) DeleteByID(id string) error {
 	_, err := s.db.Exec(`DELETE FROM messages WHERE id = ?`, id)
+	if err == nil {
+		s.invalidateAssistantByID(id)
+	}
 	return err
 }
 
@@ -333,6 +462,7 @@ func (s *MessageStore) DeleteFromID(id string, chatID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	s.InvalidateLatestAssistant(chatID)
 	return result.RowsAffected()
 }
 
@@ -353,25 +483,14 @@ func (s *MessageStore) UpdateContent(id, content string, tokens int) error {
 	if role == "assistant" {
 		content, panel = statusbar.Split(content)
 	}
-	if _, err := tx.Exec(`UPDATE messages SET content = ?, tokens = ? WHERE id = ?`, content, tokens, id); err != nil {
+	if _, err := tx.Exec(`UPDATE messages SET content = ?, status_bar = ?, tokens = ? WHERE id = ?`, content, panel, tokens, id); err != nil {
 		return err
 	}
-	if panel == "" {
-		if _, err := tx.Exec(`DELETE FROM message_status_bars WHERE message_id = ?`, id); err != nil {
-			return err
-		}
-	} else {
-		now := time.Now()
-		if _, err := tx.Exec(`
-			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT(message_id) DO UPDATE SET
-				chat_id = excluded.chat_id,
-				message_seq = excluded.message_seq,
-				content = excluded.content,
-				updated_at = excluded.updated_at`, id, chatID, seq, panel, now, now); err != nil {
-			return err
-		}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-	return tx.Commit()
+	if role == "assistant" {
+		s.InvalidateLatestAssistant(chatID)
+	}
+	return nil
 }

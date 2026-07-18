@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"litechat/internal/statusbar"
 	"strings"
 	"testing"
 )
@@ -119,14 +120,28 @@ func TestInitSchemaMigratesLegacyStatusBars(t *testing.T) {
 		VALUES ('legacy-chat', 'legacy-user', 'legacy-char', 'Legacy Chat')`); err != nil {
 		t.Fatalf("insert legacy chat: %v", err)
 	}
-	legacyContent := "旧正文。\n\n'''\n【状态栏】\n地点：旧城\n'''"
+	legacyContent := "old body\n\n'''\n" + statusbar.Marker + "\nlocation: old city\n'''"
 	if _, err := db.Exec(`
 		INSERT INTO messages (id, chat_id, seq, role, content)
 		VALUES ('legacy-message', 'legacy-chat', 1, 'assistant', ?)`, legacyContent); err != nil {
 		t.Fatalf("insert legacy message: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE message_status_bars`); err != nil {
-		t.Fatalf("remove new status table: %v", err)
+	if _, err := db.Exec(`
+		INSERT INTO messages (id, chat_id, seq, role, content)
+		VALUES ('split-message', 'legacy-chat', 2, 'assistant', 'split body')`); err != nil {
+		t.Fatalf("insert split message: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE message_status_bars (
+			message_id TEXT PRIMARY KEY,
+			content TEXT NOT NULL
+		)`); err != nil {
+		t.Fatalf("create legacy status table: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO message_status_bars (message_id, content)
+		VALUES ('split-message', ?)`, statusbar.Marker+"\nlocation: separate table"); err != nil {
+		t.Fatalf("insert legacy separate status: %v", err)
 	}
 
 	if err := db.InitSchema(); err != nil {
@@ -136,7 +151,23 @@ func TestInitSchemaMigratesLegacyStatusBars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load migrated message: %v", err)
 	}
-	if message.Content != "旧正文。" || !strings.Contains(message.StatusBar, "地点：旧城") {
+	if message.Content != "old body" || !strings.Contains(message.StatusBar, "old city") {
 		t.Fatalf("legacy status bar was not migrated: %+v", message)
+	}
+	splitMessage, err := NewMessageStore(db).GetByID("split-message")
+	if err != nil {
+		t.Fatalf("load separately stored status: %v", err)
+	}
+	if splitMessage.Content != "split body" || !strings.Contains(splitMessage.StatusBar, "separate table") {
+		t.Fatalf("separate status bar was not moved onto message row: %+v", splitMessage)
+	}
+	var legacyTableCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'message_status_bars'`).Scan(&legacyTableCount); err != nil {
+		t.Fatalf("check legacy status table: %v", err)
+	}
+	if legacyTableCount != 0 {
+		t.Fatalf("legacy status table still exists")
 	}
 }
