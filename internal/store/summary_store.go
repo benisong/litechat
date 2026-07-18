@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"litechat/internal/model"
 	"time"
 
@@ -12,13 +11,51 @@ import (
 
 // SummaryStore 管理摘要状态与分片。
 type SummaryStore struct {
-	db *DB
+	db        *DB
+	messageDB *DB
 }
 
 var ErrSummaryStateChanged = errors.New("摘要状态已变化，请刷新后重试")
 
-func NewSummaryStore(db *DB) *SummaryStore {
-	return &SummaryStore{db: db}
+func NewSummaryStore(db *DB, messageDB ...*DB) *SummaryStore {
+	mainDB := db
+	if len(messageDB) > 0 && messageDB[0] != nil {
+		mainDB = messageDB[0]
+	}
+	return &SummaryStore{db: db, messageDB: mainDB}
+}
+
+func (s *SummaryStore) ListChatIDs() ([]string, error) {
+	rows, err := s.db.Query(`SELECT chat_id FROM chat_summary_state ORDER BY chat_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chatIDs []string
+	for rows.Next() {
+		var chatID string
+		if err := rows.Scan(&chatID); err != nil {
+			return nil, err
+		}
+		chatIDs = append(chatIDs, chatID)
+	}
+	return chatIDs, rows.Err()
+}
+
+func (s *SummaryStore) DeleteChat(chatID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM chat_summary_chunks WHERE chat_id = ?`, chatID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM chat_summary_state WHERE chat_id = ?`, chatID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SummaryStore) EnsureState(chatID string) error {
@@ -31,13 +68,37 @@ func (s *SummaryStore) EnsureState(chatID string) error {
 func (s *SummaryStore) GetState(chatID string) (*model.ChatSummaryState, error) {
 	state := &model.ChatSummaryState{}
 	load := func() error {
-		var currentBig sql.NullString
+		var currentBig, pendingStatus, pendingRunID, pendingError sql.NullString
+		var pendingStartedAt sql.NullTime
 		err := s.db.QueryRow(`
-			SELECT chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq, updated_at
+			SELECT chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq,
+			       pending_to_seq, pending_status, pending_run_id, pending_attempts,
+			       pending_error, pending_started_at, summary_required, next_summary_floor,
+			       eligibility_seq, updated_at
 			FROM chat_summary_state WHERE chat_id = ?`, chatID,
-		).Scan(&state.ChatID, &state.AppliedCutoffSeq, &currentBig, &state.DirtyFromSeq, &state.UpdatedAt)
-		if err == nil && currentBig.Valid {
-			state.CurrentBigSummary = currentBig.String
+		).Scan(
+			&state.ChatID, &state.AppliedCutoffSeq, &currentBig, &state.DirtyFromSeq,
+			&state.PendingToSeq, &pendingStatus, &pendingRunID, &state.PendingAttempts,
+			&pendingError, &pendingStartedAt, &state.SummaryRequired, &state.NextSummaryFloor,
+			&state.EligibilitySeq, &state.UpdatedAt,
+		)
+		if err == nil {
+			if currentBig.Valid {
+				state.CurrentBigSummary = currentBig.String
+			}
+			if pendingStatus.Valid {
+				state.PendingStatus = pendingStatus.String
+			}
+			if pendingRunID.Valid {
+				state.PendingRunID = pendingRunID.String
+			}
+			if pendingError.Valid {
+				state.PendingError = pendingError.String
+			}
+			if pendingStartedAt.Valid {
+				startedAt := pendingStartedAt.Time
+				state.PendingStartedAt = &startedAt
+			}
 		}
 		return err
 	}
@@ -71,24 +132,219 @@ func (s *SummaryStore) ApplySmallSummary(chatID string, cutoffSeq int) error {
 	return err
 }
 
-// CommitRollingSummaryAndExchange 在所有模型调用完成后，短暂开启事务并原子写入摘要与本轮消息。
-// expectedCutoffSeq / expectedLatestSeq 用于防止等待模型期间同一会话被其他请求修改。
-func (s *SummaryStore) CommitRollingSummaryAndExchange(
-	chatID string,
-	expectedCutoffSeq int,
-	expectedLatestSeq int,
-	expectedLatestID string,
-	summaryToSeq int,
-	summaryContent string,
-	userContent string,
-	assistantContent string,
-) error {
-	if summaryToSeq <= expectedCutoffSeq || summaryToSeq > expectedLatestSeq {
-		return fmt.Errorf("无效的摘要范围: cutoff=%d to=%d latest=%d", expectedCutoffSeq, summaryToSeq, expectedLatestSeq)
+type PendingSummaryJob struct {
+	ChatID          string
+	BaseCutoffSeq   int
+	ToSeq           int
+	TargetMessageID string
+	RunID           string
+	Attempt         int
+}
+
+// UpdateSummaryEligibility persists the two trigger parameters and queues an eligible boundary.
+// Evaluations older than the latest committed snapshot are ignored.
+func (s *SummaryStore) UpdateSummaryEligibility(chatID string, required bool, currentFloor, toSeq, evaluatedSeq int) (bool, error) {
+	if err := s.EnsureState(chatID); err != nil {
+		return false, err
 	}
-	if summaryContent == "" || userContent == "" || assistantContent == "" {
-		return errors.New("摘要或本轮消息为空")
+	var latestMessageSeq int
+	if err := s.messageDB.QueryRow(`
+		SELECT COALESCE(MAX(seq), 0) FROM messages WHERE chat_id = ?`, chatID,
+	).Scan(&latestMessageSeq); err != nil {
+		return false, err
 	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var cutoff, nextFloor, eligibilitySeq int
+	var pendingStatus string
+	if err := tx.QueryRow(`
+		SELECT applied_cutoff_seq, pending_status, next_summary_floor, eligibility_seq
+		FROM chat_summary_state WHERE chat_id = ?`, chatID,
+	).Scan(&cutoff, &pendingStatus, &nextFloor, &eligibilitySeq); err != nil {
+		return false, err
+	}
+	if evaluatedSeq != latestMessageSeq || evaluatedSeq < eligibilitySeq {
+		return false, tx.Commit()
+	}
+
+	now := time.Now()
+	if !required {
+		if pendingStatus == "running" {
+			_, err = tx.Exec(`
+				UPDATE chat_summary_state
+				SET summary_required = 0, eligibility_seq = MAX(eligibility_seq, ?), updated_at = ?
+				WHERE chat_id = ?`, evaluatedSeq, now, chatID)
+		} else {
+			_, err = tx.Exec(`
+				UPDATE chat_summary_state
+				SET summary_required = 0, pending_to_seq = 0, pending_status = '', pending_run_id = '',
+				    pending_attempts = 0, pending_error = '', pending_started_at = NULL,
+				    eligibility_seq = MAX(eligibility_seq, ?), updated_at = ?
+				WHERE chat_id = ?`, evaluatedSeq, now, chatID)
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	}
+	if toSeq <= cutoff {
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_state
+			SET summary_required = 1, eligibility_seq = MAX(eligibility_seq, ?), updated_at = ?
+			WHERE chat_id = ?`, evaluatedSeq, now, chatID); err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	}
+
+	if pendingStatus == "failed" {
+		_, err = tx.Exec(`
+			UPDATE chat_summary_state
+			SET summary_required = 1, pending_to_seq = CASE WHEN pending_to_seq < ? THEN ? ELSE pending_to_seq END,
+			    eligibility_seq = MAX(eligibility_seq, ?), updated_at = ? WHERE chat_id = ?`,
+			toSeq, toSeq, evaluatedSeq, now, chatID)
+		if err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	}
+	if pendingStatus == "pending" || pendingStatus == "running" || currentFloor < nextFloor {
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_state
+			SET summary_required = 1, eligibility_seq = MAX(eligibility_seq, ?), updated_at = ?
+			WHERE chat_id = ?`, evaluatedSeq, now, chatID); err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	}
+
+	result, err := tx.Exec(`
+		UPDATE chat_summary_state
+		SET summary_required = 1, pending_to_seq = ?, pending_status = 'pending', pending_run_id = '',
+		    pending_attempts = 0, pending_error = '', pending_started_at = NULL,
+		    eligibility_seq = MAX(eligibility_seq, ?), updated_at = ?
+		WHERE chat_id = ?`, toSeq, evaluatedSeq, now, chatID,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// ClaimPendingSummary leases one pending job. The transaction ends before any network request.
+func (s *SummaryStore) ClaimPendingSummary(chatID string, staleBefore time.Time) (*PendingSummaryJob, error) {
+	return s.claimPendingSummary(chatID, staleBefore, 0)
+}
+
+// ClaimPendingSummaryBefore prevents a delayed wake-up from claiming a summary
+// that was queued by an assistant reply generated after the triggering user message.
+func (s *SummaryStore) ClaimPendingSummaryBefore(chatID string, staleBefore time.Time, beforeSeq int) (*PendingSummaryJob, error) {
+	return s.claimPendingSummary(chatID, staleBefore, beforeSeq)
+}
+
+func (s *SummaryStore) claimPendingSummary(chatID string, staleBefore time.Time, beforeSeq int) (*PendingSummaryJob, error) {
+	if err := s.EnsureState(chatID); err != nil {
+		return nil, err
+	}
+	var currentFloor int
+	if err := s.messageDB.QueryRow(`
+		SELECT COUNT(*) FROM messages WHERE chat_id = ? AND role = 'assistant'`, chatID,
+	).Scan(&currentFloor); err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	runID := uuid.New().String()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`
+		UPDATE chat_summary_state
+		SET pending_status = 'running', pending_run_id = ?,
+		    pending_attempts = pending_attempts + 1, pending_error = '',
+		    pending_started_at = ?,
+		    next_summary_floor = ? + 10,
+		    updated_at = ?
+		WHERE chat_id = ? AND summary_required = 1 AND pending_to_seq > applied_cutoff_seq
+		  AND ? >= next_summary_floor
+		  AND (? <= 0 OR pending_to_seq < ?)
+		  AND (
+		    pending_status IN ('pending', 'failed')
+		    OR (pending_status = 'running' AND (pending_started_at IS NULL OR pending_started_at < ?))
+		  )`, runID, now, currentFloor, now, chatID, currentFloor, beforeSeq, beforeSeq, staleBefore)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, tx.Commit()
+	}
+
+	job := &PendingSummaryJob{ChatID: chatID, RunID: runID}
+	if err := tx.QueryRow(`
+		SELECT applied_cutoff_seq, pending_to_seq, pending_attempts
+		FROM chat_summary_state WHERE chat_id = ?`, chatID,
+	).Scan(&job.BaseCutoffSeq, &job.ToSeq, &job.Attempt); err != nil {
+		return nil, err
+	}
+	var targetRole string
+	if err := s.messageDB.QueryRow(`
+		SELECT id, role FROM messages WHERE chat_id = ? AND seq = ?`, chatID, job.ToSeq,
+	).Scan(&job.TargetMessageID, &targetRole); err != nil {
+		return nil, err
+	}
+	if targetRole != "assistant" || job.ToSeq <= job.BaseCutoffSeq {
+		return nil, ErrSummaryStateChanged
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+// CompletePendingSummary promotes a successful rolling summary in one short transaction.
+func (s *SummaryStore) CompletePendingSummary(job *PendingSummaryJob, summaryContent string, charLimit int) error {
+	if job == nil || summaryContent == "" || job.ToSeq <= job.BaseCutoffSeq {
+		return errors.New("摘要任务或摘要内容为空")
+	}
+	if charLimit <= 0 {
+		charLimit = 3000
+	}
+	var targetID, targetRole string
+	if err := s.messageDB.QueryRow(`
+		SELECT id, role FROM messages WHERE chat_id = ? AND seq = ?`, job.ChatID, job.ToSeq,
+	).Scan(&targetID, &targetRole); err != nil {
+		return err
+	}
+	if targetID != job.TargetMessageID || targetRole != "assistant" {
+		return ErrSummaryStateChanged
+	}
+	var unsummarizedChars, latestMessageSeq int
+	if err := s.messageDB.QueryRow(`
+		SELECT COALESCE(SUM(CASE WHEN seq > ? THEN LENGTH(content) ELSE 0 END), 0),
+		       COALESCE(MAX(seq), 0)
+		FROM messages WHERE chat_id = ?`, job.ToSeq, job.ChatID,
+	).Scan(&unsummarizedChars, &latestMessageSeq); err != nil {
+		return err
+	}
+	summaryRequired := unsummarizedChars >= charLimit
 
 	now := time.Now()
 	tx, err := s.db.Begin()
@@ -97,70 +353,256 @@ func (s *SummaryStore) CommitRollingSummaryAndExchange(
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
-		INSERT OR IGNORE INTO chat_summary_state
-			(chat_id, applied_cutoff_seq, current_big_summary_id, dirty_from_seq, updated_at)
-		VALUES (?, 0, '', 0, ?)`, chatID, now); err != nil {
-		return err
-	}
-
-	var currentCutoff int
+	var cutoff, dirtyFrom, pendingTo int
+	var pendingStatus, pendingRunID string
 	if err := tx.QueryRow(`
-		SELECT applied_cutoff_seq FROM chat_summary_state WHERE chat_id = ?`, chatID,
-	).Scan(&currentCutoff); err != nil {
+		SELECT applied_cutoff_seq, dirty_from_seq, pending_to_seq, pending_status, pending_run_id
+		FROM chat_summary_state WHERE chat_id = ?`, job.ChatID,
+	).Scan(&cutoff, &dirtyFrom, &pendingTo, &pendingStatus, &pendingRunID); err != nil {
 		return err
 	}
-	latestSeq := 0
-	latestID := ""
-	err = tx.QueryRow(`
-		SELECT seq, id FROM messages
-		WHERE chat_id = ?
-		ORDER BY seq DESC, created_at DESC LIMIT 1`, chatID,
-	).Scan(&latestSeq, &latestID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if currentCutoff != expectedCutoffSeq || latestSeq != expectedLatestSeq || latestID != expectedLatestID {
+	if cutoff != job.BaseCutoffSeq || pendingTo != job.ToSeq ||
+		pendingStatus != "running" || pendingRunID != job.RunID ||
+		(dirtyFrom > 0 && dirtyFrom <= job.ToSeq) {
 		return ErrSummaryStateChanged
 	}
 
 	summaryID := uuid.New().String()
 	if _, err := tx.Exec(`
 		UPDATE chat_summary_chunks
-		SET status = 'dirty', updated_at = ?
-		WHERE chat_id = ? AND status != 'dirty'`, now, chatID); err != nil {
+		SET status = 'superseded', updated_at = ?
+		WHERE chat_id = ? AND level = 'big' AND status = 'active'`, now, job.ChatID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE chat_summary_chunks
+		SET status = 'merged', merged_into_id = ?, updated_at = ?
+		WHERE chat_id = ? AND level = 'small' AND status = 'active'`, summaryID, now, job.ChatID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO chat_summary_chunks
-			(id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at)
-		VALUES (?, ?, 'big', 1, ?, ?, 'active', '', ?, ?)`,
-		summaryID, chatID, summaryToSeq, summaryContent, now, now); err != nil {
+			(id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at)
+		VALUES (?, ?, 'big', 1, ?, ?, ?, 'active', '', ?, ?)`,
+		summaryID, job.ChatID, job.ToSeq, job.TargetMessageID, summaryContent, now, now); err != nil {
 		return err
 	}
-
-	userSeq := expectedLatestSeq + 1
-	assistantSeq := expectedLatestSeq + 2
-	if _, err := tx.Exec(`
-		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
-		VALUES (?, ?, ?, 'user', ?, 0, ?)`,
-		uuid.New().String(), chatID, userSeq, userContent, now); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`
-		INSERT INTO messages (id, chat_id, seq, role, content, tokens, created_at)
-		VALUES (?, ?, ?, 'assistant', ?, 0, ?)`,
-		uuid.New().String(), chatID, assistantSeq, assistantContent, now); err != nil {
-		return err
-	}
-
 	if _, err := tx.Exec(`
 		UPDATE chat_summary_state
-		SET applied_cutoff_seq = ?, current_big_summary_id = ?, dirty_from_seq = 0, updated_at = ?
-		WHERE chat_id = ?`, summaryToSeq, summaryID, now, chatID); err != nil {
+		SET applied_cutoff_seq = ?, current_big_summary_id = ?, dirty_from_seq = 0,
+		    pending_to_seq = 0, pending_status = '', pending_run_id = '',
+		    pending_attempts = 0, pending_error = '', pending_started_at = NULL,
+		    summary_required = ?,
+		    eligibility_seq = MAX(eligibility_seq, ?),
+		    updated_at = ?
+		WHERE chat_id = ?`, job.ToSeq, summaryID, summaryRequired, latestMessageSeq, now, job.ChatID); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *SummaryStore) FailPendingSummary(job *PendingSummaryJob, summaryErr error) error {
+	if job == nil {
+		return nil
+	}
+	errorText := "摘要生成失败"
+	if summaryErr != nil {
+		errorText = summaryErr.Error()
+	}
+	latestAssistantSeq := job.ToSeq
+	if err := s.messageDB.QueryRow(`
+		SELECT COALESCE(MAX(seq), ?) FROM messages WHERE chat_id = ? AND role = 'assistant'`,
+		job.ToSeq, job.ChatID,
+	).Scan(&latestAssistantSeq); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`
+		UPDATE chat_summary_state
+		SET pending_to_seq = MAX(pending_to_seq, ?),
+		    pending_status = 'failed', pending_run_id = '', pending_error = ?,
+		    pending_started_at = NULL, updated_at = ?
+		WHERE chat_id = ? AND pending_status = 'running' AND pending_run_id = ?`,
+		latestAssistantSeq, errorText, time.Now(), job.ChatID, job.RunID,
+	)
+	return err
+}
+
+func (s *SummaryStore) ResetPendingSummaryFromSeq(chatID string, fromSeq int) error {
+	if fromSeq <= 0 {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		UPDATE chat_summary_state
+		SET pending_to_seq = 0, pending_status = '', pending_run_id = '',
+		    pending_attempts = 0, pending_error = '', pending_started_at = NULL, updated_at = ?
+		WHERE chat_id = ? AND pending_to_seq >= ?`, time.Now(), chatID, fromSeq)
+	return err
+}
+
+func (s *SummaryStore) RecoverInterruptedSummaryJobs() error {
+	_, err := s.db.Exec(`
+		UPDATE chat_summary_state
+		SET pending_status = 'failed', pending_run_id = '',
+		    pending_error = '服务重启，等待下次消息重试', pending_started_at = NULL, updated_at = ?
+		WHERE pending_status = 'running'`, time.Now())
+	return err
+}
+
+// DeleteMessageAndRecalculate invalidates summary data before deleting from the
+// main database. Across separate SQLite files this ordering guarantees that a
+// running summary either commits first and is removed, or fails state validation.
+func (s *SummaryStore) DeleteMessageAndRecalculate(chatID, messageID string, cascade bool, charLimit int) (int64, error) {
+	if charLimit <= 0 {
+		charLimit = 3000
+	}
+	var fromSeq int
+	if err := s.messageDB.QueryRow(`
+		SELECT seq FROM messages WHERE id = ? AND chat_id = ?`, messageID, chatID,
+	).Scan(&fromSeq); err != nil {
+		return 0, err
+	}
+	resetNextFloor, err := s.invalidateSummaryCoverage(chatID, fromSeq)
+	if err != nil {
+		return 0, err
+	}
+
+	var result sql.Result
+	if cascade {
+		result, err = s.messageDB.Exec(`DELETE FROM messages WHERE chat_id = ? AND seq >= ?`, chatID, fromSeq)
+	} else {
+		result, err = s.messageDB.Exec(`DELETE FROM messages WHERE chat_id = ? AND id = ?`, chatID, messageID)
+	}
+	if err != nil {
+		_ = s.recalculateAfterMutation(chatID, charLimit, resetNextFloor)
+		return 0, err
+	}
+	deletedMessages, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := s.recalculateAfterMutation(chatID, charLimit, resetNextFloor); err != nil {
+		return 0, err
+	}
+	return deletedMessages, nil
+}
+
+func (s *SummaryStore) InvalidateSummariesFromSeq(chatID string, fromSeq, charLimit int) error {
+	if fromSeq <= 0 {
+		return nil
+	}
+	if charLimit <= 0 {
+		charLimit = 3000
+	}
+	resetNextFloor, err := s.invalidateSummaryCoverage(chatID, fromSeq)
+	if err != nil {
+		return err
+	}
+	return s.recalculateAfterMutation(chatID, charLimit, resetNextFloor)
+}
+
+func (s *SummaryStore) invalidateSummaryCoverage(chatID string, fromSeq int) (bool, error) {
+	if err := s.EnsureState(chatID); err != nil {
+		return false, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`DELETE FROM chat_summary_chunks WHERE chat_id = ? AND to_seq >= ?`, chatID, fromSeq)
+	if err != nil {
+		return false, err
+	}
+	deletedSummaries, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE chat_summary_chunks SET status = 'superseded', updated_at = ?
+		WHERE chat_id = ? AND level = 'big' AND status IN ('active', 'superseded')`, time.Now(), chatID); err != nil {
+		return false, err
+	}
+
+	currentSummaryID := ""
+	cutoffSeq := 0
+	err = tx.QueryRow(`
+		SELECT id, to_seq FROM chat_summary_chunks
+		WHERE chat_id = ? AND level = 'big' AND from_seq <= 1 AND status = 'superseded'
+		ORDER BY to_seq DESC LIMIT 1`, chatID,
+	).Scan(&currentSummaryID, &cutoffSeq)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if currentSummaryID != "" {
+		if _, err := tx.Exec(`
+			UPDATE chat_summary_chunks SET status = 'active', updated_at = ? WHERE id = ?`,
+			time.Now(), currentSummaryID); err != nil {
+			return false, err
+		}
+	}
+
+	var pendingTo int
+	if err := tx.QueryRow(`
+		SELECT pending_to_seq FROM chat_summary_state WHERE chat_id = ?`, chatID,
+	).Scan(&pendingTo); err != nil {
+		return false, err
+	}
+
+	pendingInvalidated := pendingTo >= fromSeq
+	resetNextFloor := deletedSummaries > 0 || pendingInvalidated
+	if _, err := tx.Exec(`
+		UPDATE chat_summary_state
+		SET applied_cutoff_seq = ?, current_big_summary_id = ?, dirty_from_seq = 0,
+		    pending_to_seq = CASE WHEN ? THEN 0 ELSE pending_to_seq END,
+		    pending_status = CASE WHEN ? THEN '' ELSE pending_status END,
+		    pending_run_id = CASE WHEN ? THEN '' ELSE pending_run_id END,
+		    pending_attempts = CASE WHEN ? THEN 0 ELSE pending_attempts END,
+		    pending_error = CASE WHEN ? THEN '' ELSE pending_error END,
+		    pending_started_at = CASE WHEN ? THEN NULL ELSE pending_started_at END,
+		    summary_required = 1,
+		    next_summary_floor = CASE WHEN ? THEN 0 ELSE next_summary_floor END,
+		    eligibility_seq = 0,
+		    updated_at = ?
+		WHERE chat_id = ?`,
+		cutoffSeq, currentSummaryID,
+		pendingInvalidated, pendingInvalidated, pendingInvalidated,
+		pendingInvalidated, pendingInvalidated, pendingInvalidated,
+		resetNextFloor, time.Now(), chatID,
+	); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return resetNextFloor, nil
+}
+
+func (s *SummaryStore) recalculateAfterMutation(chatID string, charLimit int, resetNextFloor bool) error {
+	state, err := s.GetState(chatID)
+	if err != nil {
+		return err
+	}
+	var unsummarizedChars, currentFloor, latestSeq int
+	if err := s.messageDB.QueryRow(`
+		SELECT COALESCE(SUM(CASE WHEN seq > ? THEN LENGTH(content) ELSE 0 END), 0),
+		       COUNT(CASE WHEN role = 'assistant' THEN 1 END),
+		       COALESCE(MAX(seq), 0)
+		FROM messages WHERE chat_id = ?`, state.AppliedCutoffSeq, chatID,
+	).Scan(&unsummarizedChars, &currentFloor, &latestSeq); err != nil {
+		return err
+	}
+	summaryRequired := unsummarizedChars >= charLimit
+	_, err = s.db.Exec(`
+		UPDATE chat_summary_state
+		SET summary_required = ?,
+		    next_summary_floor = CASE WHEN ? THEN ? ELSE next_summary_floor END,
+		    eligibility_seq = ?, updated_at = ?
+		WHERE chat_id = ?`,
+		summaryRequired, resetNextFloor, currentFloor, latestSeq, time.Now(), chatID,
+	)
+	return err
 }
 
 func (s *SummaryStore) SetCurrentBigSummary(chatID, chunkID string) error {
@@ -204,9 +646,9 @@ func (s *SummaryStore) CreateChunk(chunk *model.ChatSummaryChunk) error {
 
 	_, err := s.db.Exec(`
 		INSERT INTO chat_summary_chunks
-			(id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		chunk.ID, chunk.ChatID, chunk.Level, chunk.FromSeq, chunk.ToSeq, chunk.Content,
+			(id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		chunk.ID, chunk.ChatID, chunk.Level, chunk.FromSeq, chunk.ToSeq, chunk.ToMessageID, chunk.Content,
 		chunk.Status, chunk.MergedIntoID, chunk.CreatedAt, chunk.UpdatedAt,
 	)
 	return err
@@ -214,7 +656,7 @@ func (s *SummaryStore) CreateChunk(chunk *model.ChatSummaryChunk) error {
 
 func (s *SummaryStore) GetActiveBigChunk(chatID string) (*model.ChatSummaryChunk, error) {
 	row := s.db.QueryRow(`
-		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		SELECT id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'big' AND status = 'active'
 		ORDER BY to_seq DESC LIMIT 1`, chatID)
@@ -223,7 +665,7 @@ func (s *SummaryStore) GetActiveBigChunk(chatID string) (*model.ChatSummaryChunk
 
 func (s *SummaryStore) ListActiveSmallChunks(chatID string) ([]*model.ChatSummaryChunk, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		SELECT id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'small' AND status = 'active'
 		ORDER BY from_seq ASC, to_seq DESC`, chatID)
@@ -249,7 +691,7 @@ func (s *SummaryStore) GetLatestUsableBigChunk(chatID string, maxToSeq int) (*mo
 	}
 
 	row := s.db.QueryRow(`
-		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		SELECT id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'big' AND status IN ('active', 'superseded')
 		  AND from_seq <= 1 AND to_seq <= ?
@@ -263,7 +705,7 @@ func (s *SummaryStore) ListUsableSmallChunks(chatID string, maxToSeq int) ([]*mo
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, level, from_seq, to_seq, content, status, merged_into_id, created_at, updated_at
+		SELECT id, chat_id, level, from_seq, to_seq, to_message_id, content, status, merged_into_id, created_at, updated_at
 		FROM chat_summary_chunks
 		WHERE chat_id = ? AND level = 'small' AND status IN ('active', 'merged') AND to_seq <= ?
 		ORDER BY from_seq ASC, to_seq DESC`, chatID, maxToSeq)
@@ -351,6 +793,7 @@ func scanSummaryChunk(scanner summaryChunkScanner) (*model.ChatSummaryChunk, err
 		&chunk.Level,
 		&chunk.FromSeq,
 		&chunk.ToSeq,
+		&chunk.ToMessageID,
 		&chunk.Content,
 		&chunk.Status,
 		&mergedInto,

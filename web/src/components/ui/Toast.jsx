@@ -1,17 +1,19 @@
 import React from 'react'
 import { useUIStore } from '../../store'
-import { CheckCircle, AlertCircle, Info, X } from 'lucide-react'
+import { CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react'
 import clsx from 'clsx'
 
 const ICONS = {
   success: CheckCircle,
   error:   AlertCircle,
+  warning: AlertTriangle,
   info:    Info,
 }
 
 const COLORS = {
   success: 'border-green-500/30 bg-green-500/10 text-green-400',
   error:   'border-red-500/30 bg-red-500/10 text-red-400',
+  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-400',
   info:    'border-primary-500/30 bg-primary-500/10 text-primary-400',
 }
 

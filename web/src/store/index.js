@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = {
   use_default_model_for_memory: true,
   memory_model: '',
   memory_prompt_suffix: '',
+  memory_summary_char_limit: 3000,
   theme: 'dark',
   chat_font_size: '0.875rem',
   service_mode: 'self',
@@ -297,6 +298,9 @@ export const useChatStore = create((set, get) => ({
             const parsed = JSON.parse(data)
             if (parsed.done) { streamDone = true; break }
             if (parsed.error) throw new Error(parsed.error)
+            if (parsed.warning) {
+              useUIStore.getState().showToast(parsed.warning, 'warning')
+            }
             if (parsed.token) {
               fullContent += parsed.token
               // 更新流式 AI 消息
@@ -331,14 +335,11 @@ export const useChatStore = create((set, get) => ({
         : []
       set({ messages: hydratedMessages, streaming: false, streamContent: '' })
     } catch (err) {
-      const summaryFailed = String(err?.message || '').includes('消息摘要返回错误')
       set(s => ({
-        messages: s.messages.filter(m => (
-          m.id !== aiMsgPlaceholder.id && (!summaryFailed || m.id !== userMsg.id)
-        )),
+        messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id),
         streaming: false,
+        streamContent: '',
       }))
-      if (summaryFailed) err.canResend = true
       throw err
     }
   },
@@ -411,6 +412,9 @@ export const useChatStore = create((set, get) => ({
             const parsed = JSON.parse(data)
             if (parsed.done) { streamDone = true; break }
             if (parsed.error) throw new Error(parsed.error)
+            if (parsed.warning) {
+              useUIStore.getState().showToast(parsed.warning, 'warning')
+            }
             if (parsed.token) {
               fullContent += parsed.token
               set(s => ({

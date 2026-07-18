@@ -9,6 +9,7 @@ import (
 	"litechat/internal/service"
 	"litechat/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -28,12 +29,12 @@ type Handlers struct {
 }
 
 const (
-	statusBarEntryKey             = "状态栏"
-	defaultStatusBarTemplate      = "'''\n【状态栏】\n时间：{{time}}\n地点：[当前所在地点]\n我方状态：[用户角色当前的身体/心情/处境]\n对方状态：[角色当前的身体/心情/处境]\n关系：[双方当前关系]\n当前事件：[此刻正在发生的事]\n'''"
-	statusBarInjectionPosition    = 1
-	statusBarInjectionDepth       = 0
-	statusBarOrder                = 0
-	statusBarRole                 = "system"
+	statusBarEntryKey          = "状态栏"
+	defaultStatusBarTemplate   = "'''\n【状态栏】\n时间：{{time}}\n地点：[当前所在地点]\n我方状态：[用户角色当前的身体/心情/处境]\n对方状态：[角色当前的身体/心情/处境]\n关系：[双方当前关系]\n当前事件：[此刻正在发生的事]\n'''"
+	statusBarInjectionPosition = 1
+	statusBarInjectionDepth    = 0
+	statusBarOrder             = 0
+	statusBarRole              = "system"
 )
 
 func isStatusBarEntry(entry *model.WorldBookEntry) bool {
@@ -686,9 +687,16 @@ func (h *Handlers) GetChat(c *gin.Context) {
 // DeleteChat DELETE /api/chats/:id
 func (h *Handlers) DeleteChat(c *gin.Context) {
 	userID := GetUserID(c)
-	if err := h.chatStore.Delete(c.Param("id"), userID); err != nil {
+	chatID := c.Param("id")
+	if h.summaryService != nil {
+		h.summaryService.ForgetChat(chatID)
+	}
+	if err := h.chatStore.Delete(chatID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if h.summaryService != nil {
+		h.summaryService.DeleteChatDataAsync(chatID)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
@@ -755,6 +763,13 @@ func (h *Handlers) SendMessage(c *gin.Context) {
 		flusher.Flush()
 		return
 	}
+	if h.summaryService != nil {
+		if warning := h.summaryService.Warning(chatID); warning != "" {
+			warningBytes, _ := json.Marshal(map[string]string{"warning": warning})
+			fmt.Fprintf(c.Writer, "data: %s\n\n", string(warningBytes))
+			flusher.Flush()
+		}
+	}
 
 	// 发送结束标记
 	fmt.Fprintf(c.Writer, "data: {\"done\":true}\n\n")
@@ -774,12 +789,14 @@ func (h *Handlers) DeleteMessage(c *gin.Context) {
 		return
 	}
 
-	if err := h.messageStore.DeleteByID(msg.ID); err != nil {
+	if h.summaryService != nil {
+		if _, err := h.summaryService.DeleteMessageAndRecalculate(msg.ChatID, msg.ID, false); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else if err := h.messageStore.DeleteByID(msg.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	if h.summaryService != nil {
-		h.summaryService.InvalidateFromSeq(msg.ChatID, msg.Seq)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
@@ -801,14 +818,20 @@ func (h *Handlers) DeleteMessageCascade(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
 		return
 	}
+	if msg.ChatID != chatID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
 
-	count, err := h.messageStore.DeleteFromID(msgID, chatID)
+	var count int64
+	if h.summaryService != nil {
+		count, err = h.summaryService.DeleteMessageAndRecalculate(chatID, msgID, true)
+	} else {
+		count, err = h.messageStore.DeleteFromID(msgID, chatID)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	if h.summaryService != nil {
-		h.summaryService.InvalidateFromSeq(chatID, msg.Seq)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("已删除 %d 条消息", count), "deleted": count})
 }
@@ -846,6 +869,13 @@ func (h *Handlers) RegenerateMessage(c *gin.Context) {
 		fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()
 		return
+	}
+	if h.summaryService != nil {
+		if warning := h.summaryService.Warning(chatID); warning != "" {
+			warningBytes, _ := json.Marshal(map[string]string{"warning": warning})
+			fmt.Fprintf(c.Writer, "data: %s\n\n", string(warningBytes))
+			flusher.Flush()
+		}
 	}
 
 	fmt.Fprintf(c.Writer, "data: {\"done\":true}\n\n")
@@ -1110,9 +1140,14 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	settings := model.AppSettings{
 		UseDefaultModelForCharacterCard: true,
 		UseDefaultModelForMemory:        true,
+		MemorySummaryCharLimit:          3000,
 	}
 	if err := c.ShouldBindJSON(&settings); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if settings.MemorySummaryCharLimit < 500 || settings.MemorySummaryCharLimit > 200000 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "摘要字数上限必须在 500 到 200000 之间"})
 		return
 	}
 
@@ -1132,11 +1167,18 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	h.configStore.Set("use_default_model_for_memory", fmt.Sprintf("%t", settings.UseDefaultModelForMemory))
 	h.configStore.Set("memory_model", settings.MemoryModel)
 	h.configStore.Set("memory_prompt_suffix", settings.MemoryPromptSuffix)
+	h.configStore.Set("memory_summary_char_limit", strconv.Itoa(settings.MemorySummaryCharLimit))
 	if settings.Theme != "" {
 		h.configStore.Set("theme", settings.Theme)
 	}
 	if settings.ServiceMode != "" {
-		h.configStore.Set("service_mode", settings.ServiceMode)
+		if err := h.configStore.Set("service_mode", settings.ServiceMode); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存运行模式失败"})
+			return
+		}
+		if h.summaryService != nil {
+			h.summaryService.SetEnabled(settings.ServiceMode == "service")
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "设置已保存"})

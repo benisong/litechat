@@ -446,6 +446,7 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 	settings := &model.AppSettings{
 		UseDefaultModelForCharacterCard: true,
 		UseDefaultModelForMemory:        true,
+		MemorySummaryCharLimit:          3000,
 		ServiceMode:                     "self",
 	}
 	rows, err := s.db.Query(`SELECT key, value FROM configs`)
@@ -482,6 +483,11 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			settings.MemoryModel = v
 		case "memory_prompt_suffix":
 			settings.MemoryPromptSuffix = v
+		case "memory_summary_char_limit":
+			parsed, err := strconv.Atoi(v)
+			if err == nil && parsed > 0 {
+				settings.MemorySummaryCharLimit = parsed
+			}
 		case "theme":
 			settings.Theme = v
 		case "service_mode":

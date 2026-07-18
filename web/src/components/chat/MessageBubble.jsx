@@ -14,7 +14,7 @@ function formatDurationSeconds(seconds) {
 // 标题之前为正文，标题及之后为状态栏块。顺带剥掉残留的 ``` 或 ''' 代码块围栏行。
 function splitStatusBar(content) {
   if (typeof content !== 'string') return { body: content, statusBar: null }
-  const idx = content.indexOf('【状态栏】')
+  const idx = content.lastIndexOf('【状态栏】')
   if (idx === -1) return { body: content, statusBar: null }
   // 向上回溯到该行行首，连同可能的围栏行一起划入状态栏块
   let start = content.lastIndexOf('\n', idx - 1)
@@ -37,10 +37,17 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
   const isStreaming = message.isStreaming
   const isTemp = message.id?.startsWith('temp')
   const durationLabel = !isUser ? formatDurationSeconds(message.response_time_seconds) : null
+  const legacyParts = !isUser ? splitStatusBar(message.content) : { body: message.content, statusBar: null }
+  const bodyContent = message.status_bar ? message.content : legacyParts.body
+  const statusBarContent = message.status_bar || legacyParts.statusBar
+  const hasDisplayContent = Boolean(message.content || statusBarContent)
 
   const handleCopy = async (e) => {
     e.stopPropagation()
-    await navigator.clipboard.writeText(message.content)
+    const copyContent = isUser
+      ? message.content
+      : [bodyContent, statusBarContent].filter(Boolean).join('\n\n')
+    await navigator.clipboard.writeText(copyContent)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -88,15 +95,14 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
                   if (isStreaming) {
                     return <MessageContent content={message.content} isUser={false} />
                   }
-                  const { body, statusBar } = splitStatusBar(message.content)
                   const sbBg = statusBarStyle?.bg || ''
                   const sbFg = statusBarStyle?.fg || ''
                   const sbBlockStyle = sbBg ? { backgroundColor: sbBg, borderColor: sbBg } : undefined
                   const sbTextStyle = sbFg ? { color: sbFg } : undefined
                   return (
                     <>
-                      <MessageContent content={body} isUser={false} />
-                      {statusBar && (
+                      <MessageContent content={bodyContent} isUser={false} />
+                      {statusBarContent && (
                         <div
                           className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/[0.04] overflow-hidden"
                           style={sbBlockStyle}>
@@ -116,7 +122,7 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
                               style={sbTextStyle}
                               className="px-3 py-2 text-[12px] leading-relaxed text-cyan-100/90
                                             font-mono whitespace-pre-wrap break-words border-t border-cyan-500/15">
-                              {statusBar}
+                              {statusBarContent}
                             </pre>
                           )}
                         </div>
@@ -130,7 +136,7 @@ export default function MessageBubble({ message, character, statusBarStyle, onRe
             {!message.content && isStreaming && <span className="typing-cursor" />}
           </div>
 
-          {!isStreaming && message.content && (
+          {!isStreaming && hasDisplayContent && (
             <div className={clsx(
               'flex items-center gap-1.5 px-0.5',
               isUser ? 'flex-row-reverse' : 'flex-row'

@@ -3,9 +3,11 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"litechat/internal/statusbar"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，无需 CGO
 )
@@ -13,6 +15,7 @@ import (
 // DB 数据库连接封装
 type DB struct {
 	*sql.DB
+	path string
 }
 
 // NewDB 创建数据库连接
@@ -34,7 +37,7 @@ func NewDB(dataDir string) (*DB, error) {
 	}
 
 	log.Printf("数据库已连接: %s", dbPath)
-	return &DB{db}, nil
+	return &DB{DB: db, path: dbPath}, nil
 }
 
 // InitSchema 初始化数据库表结构
@@ -144,12 +147,33 @@ func (db *DB) InitSchema() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- Assistant status panels are stored separately so they never enter chat history or summaries.
+	CREATE TABLE IF NOT EXISTS message_status_bars (
+		message_id  TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+		chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		message_seq INTEGER NOT NULL,
+		content     TEXT NOT NULL,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_message_status_bars_chat_seq ON message_status_bars(chat_id, message_seq);
+
 
 	CREATE TABLE IF NOT EXISTS chat_summary_state (
 		chat_id                 TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
 		applied_cutoff_seq      INTEGER DEFAULT 0,
 		current_big_summary_id  TEXT DEFAULT '',
 		dirty_from_seq          INTEGER DEFAULT 0,
+		pending_to_seq          INTEGER DEFAULT 0,
+		pending_status          TEXT DEFAULT '',
+		pending_run_id          TEXT DEFAULT '',
+		pending_attempts        INTEGER DEFAULT 0,
+		pending_error           TEXT DEFAULT '',
+		pending_started_at      DATETIME,
+		summary_required        INTEGER DEFAULT 0,
+		next_summary_floor      INTEGER DEFAULT 0,
+		eligibility_seq         INTEGER DEFAULT 0,
 		updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -159,6 +183,7 @@ func (db *DB) InitSchema() error {
 		level          TEXT NOT NULL,
 		from_seq       INTEGER NOT NULL,
 		to_seq         INTEGER NOT NULL,
+		to_message_id  TEXT DEFAULT '',
 		content        TEXT NOT NULL,
 		status         TEXT NOT NULL DEFAULT 'active',
 		merged_into_id TEXT DEFAULT '',
@@ -200,6 +225,7 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('use_default_model_for_memory', 'true');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_model', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_summary_char_limit', '3000');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_prompt_suffix', '');
@@ -231,6 +257,16 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_detail TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE messages ADD COLUMN seq INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_to_seq INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_status TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_run_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_attempts INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_error TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN pending_started_at DATETIME`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN summary_required INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN next_summary_floor INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_state ADD COLUMN eligibility_seq INTEGER DEFAULT 0`)
+	db.Exec(`ALTER TABLE chat_summary_chunks ADD COLUMN to_message_id TEXT DEFAULT ''`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
@@ -257,7 +293,70 @@ func (db *DB) InitSchema() error {
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq)`); err != nil {
 		return fmt.Errorf("创建消息顺序索引失败: %w", err)
 	}
+	if err := db.migrateLegacyStatusBars(); err != nil {
+		return fmt.Errorf("迁移历史状态栏失败: %w", err)
+	}
 
 	log.Println("数据库结构初始化完成")
 	return nil
+}
+
+func (db *DB) migrateLegacyStatusBars() error {
+	type legacyMessage struct {
+		id      string
+		chatID  string
+		seq     int
+		content string
+	}
+
+	rows, err := db.Query(`
+		SELECT id, chat_id, seq, content
+		FROM messages
+		WHERE role = 'assistant' AND instr(content, ?) > 0`, statusbar.Marker)
+	if err != nil {
+		return err
+	}
+	var legacy []legacyMessage
+	for rows.Next() {
+		var message legacyMessage
+		if err := rows.Scan(&message.id, &message.chatID, &message.seq, &message.content); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		legacy = append(legacy, message)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(legacy) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now()
+	for _, message := range legacy {
+		body, panel := statusbar.Split(message.content)
+		if panel == "" {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE messages SET content = ? WHERE id = ?`, body, message.id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(message_id) DO UPDATE SET
+				chat_id = excluded.chat_id,
+				message_seq = excluded.message_seq,
+				content = excluded.content,
+				updated_at = excluded.updated_at`,
+			message.id, message.chatID, message.seq, panel, now, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

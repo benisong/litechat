@@ -55,6 +55,17 @@ func (s *CharacterStore) GetByID(id string, userID string) (*model.Character, er
 	return c, nil
 }
 
+// GetByChatID resolves the role card bound to a chat for background summary jobs.
+func (s *CharacterStore) GetByChatID(chatID string) (*model.Character, error) {
+	var characterID, userID string
+	if err := s.db.QueryRow(`
+		SELECT character_id, user_id FROM chats WHERE id = ?`, chatID,
+	).Scan(&characterID, &userID); err != nil {
+		return nil, err
+	}
+	return s.GetByID(characterID, userID)
+}
+
 func (s *CharacterStore) List(userID string) ([]*model.Character, error) {
 	rows, err := s.db.Query(`SELECT `+charColumns+` FROM characters WHERE user_id = ? ORDER BY updated_at DESC`, userID)
 	if err != nil {

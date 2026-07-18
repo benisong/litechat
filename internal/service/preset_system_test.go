@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"litechat/internal/model"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,49 @@ func TestPreset_PlusGlobalTextFix_StillSingleSystem(t *testing.T) {
 	}
 	if hasAdjacentSameRole(msgs) {
 		t.Errorf("出现相邻同 role: %+v", roles(msgs))
+	}
+}
+
+func TestLatestStatusBarIsInjectedOnceOutsideChatHistory(t *testing.T) {
+	svc, _, userID := newTestChatServiceWithStore(t)
+	character := &model.Character{ID: "c1", Name: "小雨"}
+	preset := &model.Preset{SystemPrompt: "主系统规则"}
+	history := []*model.Message{
+		{Seq: 1, Role: "assistant", Content: "旧正文", StatusBar: "【状态栏】\n地点：旧地点"},
+		{Seq: 2, Role: "user", Content: "继续前进"},
+		{Seq: 3, Role: "assistant", Content: "新正文", StatusBar: "【状态栏】\n地点：新地点"},
+	}
+	messages := svc.buildMessages("chat-1", preset, character, history, "现在如何", userID)
+
+	joined := ""
+	for _, message := range messages {
+		joined += "\n" + message.Content
+		if message.Role != "system" && strings.Contains(message.Content, "地点：") {
+			t.Fatalf("status panel leaked into chat history: %+v", messages)
+		}
+	}
+	if strings.Count(joined, "地点：新地点") != 1 || strings.Contains(joined, "地点：旧地点") {
+		t.Fatalf("latest status panel was not injected exactly once: %s", joined)
+	}
+	if !strings.Contains(messages[0].Content, "[Latest Status Panel]") {
+		t.Fatalf("latest status panel was not kept in the independent system block: %+v", messages)
+	}
+}
+
+func TestStatusBarFormatValidationRequiresSingleStableMarker(t *testing.T) {
+	valid := "她轻轻点头。\n\n【状态栏】\n地点：图书馆"
+	if err := validateAssistantReplyFormat(valid, true); err != nil {
+		t.Fatalf("valid status panel was rejected: %v", err)
+	}
+	if err := validateAssistantReplyFormat("她轻轻点头。", true); err == nil {
+		t.Fatal("missing status panel marker was accepted")
+	}
+	duplicated := valid + "\n【状态栏】\n地点：庭院"
+	if err := validateAssistantReplyFormat(duplicated, true); err == nil {
+		t.Fatal("duplicated status panel marker was accepted")
+	}
+	if err := validateAssistantReplyFormat("她轻轻点头。", false); err != nil {
+		t.Fatalf("status marker was required when status bar is disabled: %v", err)
 	}
 }
 

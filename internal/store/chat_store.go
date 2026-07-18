@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"litechat/internal/model"
+	"litechat/internal/statusbar"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,8 +147,31 @@ func NewMessageStore(db *DB) *MessageStore {
 	return &MessageStore{db: db}
 }
 
+const messageColumnsWithStatus = `
+	m.id, m.chat_id, m.seq, m.role, m.content, COALESCE(sb.content, ''), m.tokens, m.created_at`
+
+type messageScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanMessage(scanner messageScanner, msg *model.Message) error {
+	return scanner.Scan(
+		&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.StatusBar, &msg.Tokens, &msg.CreatedAt,
+	)
+}
+
 // Create 创建消息
 func (s *MessageStore) Create(msg *model.Message) error {
+	if msg.Role == "assistant" {
+		body, panel := statusbar.Split(msg.Content)
+		if panel != "" {
+			msg.Content = body
+			msg.StatusBar = panel
+		}
+		msg.StatusBar = strings.TrimSpace(msg.StatusBar)
+	} else {
+		msg.StatusBar = ""
+	}
 	msg.ID = uuid.New().String()
 	msg.CreatedAt = time.Now()
 
@@ -167,6 +192,14 @@ func (s *MessageStore) Create(msg *model.Message) error {
 	); err != nil {
 		return err
 	}
+	if msg.StatusBar != "" {
+		if _, err := tx.Exec(`
+			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			msg.ID, msg.ChatID, msg.Seq, msg.StatusBar, msg.CreatedAt, msg.CreatedAt); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit()
 }
@@ -174,9 +207,11 @@ func (s *MessageStore) Create(msg *model.Message) error {
 // ListByChatID 查询对话的所有消息
 func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, seq, role, content, tokens, created_at
-		FROM messages WHERE chat_id = ?
-		ORDER BY seq ASC, created_at ASC`, chatID)
+		SELECT `+messageColumnsWithStatus+`
+		FROM messages m
+		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
+		WHERE m.chat_id = ?
+		ORDER BY m.seq ASC, m.created_at ASC`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,21 +220,22 @@ func (s *MessageStore) ListByChatID(chatID string) ([]*model.Message, error) {
 	var list []*model.Message
 	for rows.Next() {
 		msg := &model.Message{}
-		if err := rows.Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt); err != nil {
+		if err := scanMessage(rows, msg); err != nil {
 			return nil, err
 		}
 		list = append(list, msg)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 // ListByChatIDRange 查询对话中指定范围的消息
 func (s *MessageStore) ListByChatIDRange(chatID string, fromSeq, toSeq int) ([]*model.Message, error) {
 	rows, err := s.db.Query(`
-		SELECT id, chat_id, seq, role, content, tokens, created_at
-		FROM messages
-		WHERE chat_id = ? AND seq >= ? AND seq <= ?
-		ORDER BY seq ASC, created_at ASC`, chatID, fromSeq, toSeq)
+		SELECT `+messageColumnsWithStatus+`
+		FROM messages m
+		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
+		WHERE m.chat_id = ? AND m.seq >= ? AND m.seq <= ?
+		ORDER BY m.seq ASC, m.created_at ASC`, chatID, fromSeq, toSeq)
 	if err != nil {
 		return nil, err
 	}
@@ -208,21 +244,23 @@ func (s *MessageStore) ListByChatIDRange(chatID string, fromSeq, toSeq int) ([]*
 	var list []*model.Message
 	for rows.Next() {
 		msg := &model.Message{}
-		if err := rows.Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt); err != nil {
+		if err := scanMessage(rows, msg); err != nil {
 			return nil, err
 		}
 		list = append(list, msg)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 // GetByID 查询单条消息
 func (s *MessageStore) GetByID(id string) (*model.Message, error) {
 	msg := &model.Message{}
-	err := s.db.QueryRow(`
-		SELECT id, chat_id, seq, role, content, tokens, created_at
-		FROM messages WHERE id = ?`, id,
-	).Scan(&msg.ID, &msg.ChatID, &msg.Seq, &msg.Role, &msg.Content, &msg.Tokens, &msg.CreatedAt)
+	row := s.db.QueryRow(`
+		SELECT `+messageColumnsWithStatus+`
+		FROM messages m
+		LEFT JOIN message_status_bars sb ON sb.message_id = m.id
+		WHERE m.id = ?`, id)
+	err := scanMessage(row, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +277,15 @@ func (s *MessageStore) LatestSeq(chatID string) (int, error) {
 		return 0, nil
 	}
 	return int(seq.Int64), nil
+}
+
+// CountAfterSeq counts raw messages not covered by the latest successful summary.
+func (s *MessageStore) CountAfterSeq(chatID string, afterSeq int) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM messages WHERE chat_id = ? AND seq > ?`, chatID, afterSeq,
+	).Scan(&count)
+	return count, err
 }
 
 // ListChatIDs 返回已有消息的会话，供启动时恢复摘要积压。
@@ -291,6 +338,40 @@ func (s *MessageStore) DeleteFromID(id string, chatID string) (int64, error) {
 
 // UpdateContent 更新消息内容（用于流式完成后更新）
 func (s *MessageStore) UpdateContent(id, content string, tokens int) error {
-	_, err := s.db.Exec(`UPDATE messages SET content=?, tokens=? WHERE id=?`, content, tokens, id)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var chatID, role string
+	var seq int
+	if err := tx.QueryRow(`SELECT chat_id, seq, role FROM messages WHERE id = ?`, id).Scan(&chatID, &seq, &role); err != nil {
+		return err
+	}
+	panel := ""
+	if role == "assistant" {
+		content, panel = statusbar.Split(content)
+	}
+	if _, err := tx.Exec(`UPDATE messages SET content = ?, tokens = ? WHERE id = ?`, content, tokens, id); err != nil {
+		return err
+	}
+	if panel == "" {
+		if _, err := tx.Exec(`DELETE FROM message_status_bars WHERE message_id = ?`, id); err != nil {
+			return err
+		}
+	} else {
+		now := time.Now()
+		if _, err := tx.Exec(`
+			INSERT INTO message_status_bars (message_id, chat_id, message_seq, content, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(message_id) DO UPDATE SET
+				chat_id = excluded.chat_id,
+				message_seq = excluded.message_seq,
+				content = excluded.content,
+				updated_at = excluded.updated_at`, id, chatID, seq, panel, now, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -180,6 +180,7 @@ export default function PresetsPage() {
   const [expandedEntry, setExpandedEntry] = useState(null)
   const [activeTab, setActiveTab] = useState('presets')
   const [memoryPrompt, setMemoryPrompt] = useState('')
+  const [memorySummaryCharLimit, setMemorySummaryCharLimit] = useState(3000)
   const [savingMemory, setSavingMemory] = useState(false)
   const fileInputRef = useRef(null)
   const isAdmin = useAuthStore(state => state.user?.role === 'admin')
@@ -193,7 +194,8 @@ export default function PresetsPage() {
 
   useEffect(() => {
     setMemoryPrompt(settings.memory_prompt_suffix || '')
-  }, [settings.memory_prompt_suffix])
+    setMemorySummaryCharLimit(settings.memory_summary_char_limit || 3000)
+  }, [settings.memory_prompt_suffix, settings.memory_summary_char_limit])
 
   useEffect(() => {
     if (!showMemoryTab && activeTab === 'memory') {
@@ -242,13 +244,19 @@ export default function PresetsPage() {
   }
 
   const handleSaveMemoryPrompt = async () => {
+    const summaryCharLimit = Number.parseInt(memorySummaryCharLimit, 10)
+    if (!Number.isInteger(summaryCharLimit) || summaryCharLimit < 500 || summaryCharLimit > 200000) {
+      showToast('摘要字数上限必须在 500 到 200000 之间', 'error')
+      return
+    }
     setSavingMemory(true)
     try {
       await saveSettings({
         ...settings,
         memory_prompt_suffix: memoryPrompt,
+        memory_summary_char_limit: summaryCharLimit,
       })
-      showToast('记忆存储提示词已保存', 'success')
+      showToast('记忆存储设置已保存', 'success')
     } catch (err) {
       showToast(err.message || '保存失败', 'error')
     } finally {
@@ -410,7 +418,7 @@ export default function PresetsPage() {
                 <h2 className="font-semibold">记忆存储提示词</h2>
               </div>
               <p className="text-sm text-gray-300">
-                这套提示词只在 <code>service</code> 模式下生效，用于后台异步生成小摘要和大摘要。
+                这套提示词只在 <code>service</code> 模式下生效，用于后台异步生成滚动摘要。
                 输出协议、标签结构和安全约束由系统固定，这里只开放补充提示词给管理员微调。
               </p>
               <p className="text-xs text-primary-300">
@@ -422,6 +430,19 @@ export default function PresetsPage() {
             </div>
 
             <div className="card p-4 space-y-3">
+              <label className="block text-xs text-gray-400">摘要字数上限</label>
+              <input
+                type="number"
+                min="500"
+                max="200000"
+                step="500"
+                className="w-full input-base text-sm"
+                value={memorySummaryCharLimit}
+                onChange={event => setMemorySummaryCharLimit(event.target.value)}
+              />
+              <p className="text-xs text-gray-500">
+                未摘要有效文本达到该字数后才标记为需要摘要；摘要失败后至少间隔 10 个对话楼层再重试。
+              </p>
               <label className="block text-xs text-gray-400">补充提示词</label>
               <textarea
                 className="w-full input-base resize-none text-sm"
@@ -438,7 +459,7 @@ export default function PresetsPage() {
                 disabled={savingMemory}
                 className="btn-primary py-2.5 px-4 text-sm"
               >
-                {savingMemory ? '保存中...' : '保存记忆存储提示词'}
+                {savingMemory ? '保存中...' : '保存记忆存储设置'}
               </button>
             </div>
 

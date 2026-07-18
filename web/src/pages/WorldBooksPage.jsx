@@ -312,7 +312,7 @@ export default function WorldBooksPage() {
             {editEntry?.keys === STATUS_BAR_ENTRY_KEY ? (
               <>
                 <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs text-gray-300 leading-relaxed">
-                  这是绑定角色卡时自动创建的特殊条目。这里只定义状态栏的<b>显示样式</b>（包括字段和包裹方式，可自行更换 【】、边框、标签等）。
+                  这是绑定角色卡时自动创建的特殊条目。这里只定义状态栏的<b>显示样式</b>（可调整字段、边框和标签等）；用于分表识别的首行标题 <code>【状态栏】</code> 由系统固定。
                   对 AI「每次回复结尾必须输出状态栏」的约束已由系统固定，不在此处、也无法修改。
                   开关请在列表页直接控制。<br />
                   注：若你用三个单引号 <code>'''</code> 包裹样式，系统会自动忽略这层包裹，只取其中内容。

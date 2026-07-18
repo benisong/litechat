@@ -34,6 +34,17 @@ func main() {
 	if err := db.InitSchema(); err != nil {
 		log.Fatalf("数据库 Schema 初始化失败: %v", err)
 	}
+	summaryDB, err := store.NewSummaryDB(dataDir)
+	if err != nil {
+		log.Fatalf("摘要数据库初始化失败: %v", err)
+	}
+	defer summaryDB.Close()
+	if err := summaryDB.InitSummarySchema(); err != nil {
+		log.Fatalf("摘要数据库 Schema 初始化失败: %v", err)
+	}
+	if err := store.MigrateLegacySummaries(db, summaryDB); err != nil {
+		log.Fatalf("迁移旧摘要数据失败: %v", err)
+	}
 
 	// 初始化各层
 	characterStore := store.NewCharacterStore(db)
@@ -43,14 +54,14 @@ func main() {
 	worldBookStore := store.NewWorldBookStore(db)
 	configStore := store.NewConfigStore(db)
 	userStore := store.NewUserStore(db)
-	summaryStore := store.NewSummaryStore(db)
+	summaryStore := store.NewSummaryStore(summaryDB, db)
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {
 		log.Fatalf("创建初始用户失败: %v", err)
 	}
 
-	summaryService := service.NewSummaryService(messageStore, summaryStore, configStore, userStore)
+	summaryService := service.NewSummaryService(messageStore, summaryStore, characterStore, configStore, userStore)
 	chatService := service.NewChatService(chatStore, messageStore, characterStore, presetStore, worldBookStore, configStore, userStore, summaryService)
 
 	handlers := api.NewHandlers(

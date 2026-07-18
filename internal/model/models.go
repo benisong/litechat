@@ -60,8 +60,19 @@ type Message struct {
 	Seq       int       `json:"seq" db:"seq"`
 	Role      string    `json:"role" db:"role"`
 	Content   string    `json:"content" db:"content"`
+	StatusBar string    `json:"status_bar,omitempty" db:"-"`
 	Tokens    int       `json:"tokens" db:"tokens"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+// MessageStatusBar stores the separately persisted status panel for one assistant message.
+type MessageStatusBar struct {
+	MessageID  string    `json:"message_id" db:"message_id"`
+	ChatID     string    `json:"chat_id" db:"chat_id"`
+	MessageSeq int       `json:"message_seq" db:"message_seq"`
+	Content    string    `json:"content" db:"content"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // Preset 预设（系统提示词模板）
@@ -147,17 +158,27 @@ type AppSettings struct {
 	UseDefaultModelForMemory        bool   `json:"use_default_model_for_memory"`
 	MemoryModel                     string `json:"memory_model"`
 	MemoryPromptSuffix              string `json:"memory_prompt_suffix"`
+	MemorySummaryCharLimit          int    `json:"memory_summary_char_limit"`
 	Theme                           string `json:"theme"`
 	ServiceMode                     string `json:"service_mode"`
 }
 
 // ChatSummaryState 会话摘要状态
 type ChatSummaryState struct {
-	ChatID            string    `json:"chat_id" db:"chat_id"`
-	AppliedCutoffSeq  int       `json:"applied_cutoff_seq" db:"applied_cutoff_seq"`
-	CurrentBigSummary string    `json:"current_big_summary_id" db:"current_big_summary_id"`
-	DirtyFromSeq      int       `json:"dirty_from_seq" db:"dirty_from_seq"`
-	UpdatedAt         time.Time `json:"updated_at" db:"updated_at"`
+	ChatID            string     `json:"chat_id" db:"chat_id"`
+	AppliedCutoffSeq  int        `json:"applied_cutoff_seq" db:"applied_cutoff_seq"`
+	CurrentBigSummary string     `json:"current_big_summary_id" db:"current_big_summary_id"`
+	DirtyFromSeq      int        `json:"dirty_from_seq" db:"dirty_from_seq"`
+	PendingToSeq      int        `json:"pending_to_seq" db:"pending_to_seq"`
+	PendingStatus     string     `json:"pending_status" db:"pending_status"`
+	PendingRunID      string     `json:"pending_run_id" db:"pending_run_id"`
+	PendingAttempts   int        `json:"pending_attempts" db:"pending_attempts"`
+	PendingError      string     `json:"pending_error" db:"pending_error"`
+	PendingStartedAt  *time.Time `json:"pending_started_at,omitempty" db:"pending_started_at"`
+	SummaryRequired   bool       `json:"summary_required" db:"summary_required"`
+	NextSummaryFloor  int        `json:"next_summary_floor" db:"next_summary_floor"`
+	EligibilitySeq    int        `json:"eligibility_seq" db:"eligibility_seq"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // ChatSummaryChunk 摘要分片（小摘要 / 大摘要）
@@ -167,6 +188,7 @@ type ChatSummaryChunk struct {
 	Level        string    `json:"level" db:"level"`
 	FromSeq      int       `json:"from_seq" db:"from_seq"`
 	ToSeq        int       `json:"to_seq" db:"to_seq"`
+	ToMessageID  string    `json:"to_message_id" db:"to_message_id"`
 	Content      string    `json:"content" db:"content"`
 	Status       string    `json:"status" db:"status"`
 	MergedIntoID string    `json:"merged_into_id" db:"merged_into_id"`

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"litechat/internal/model"
+	"litechat/internal/statusbar"
 	"litechat/internal/store"
 	"log"
 	"math/rand"
@@ -55,7 +56,7 @@ func NewChatService(
 // StreamCallback SSE 流式回调：每生成一个增量 token 就回调一次，用于边生成边推送。
 type StreamCallback func(token string) error
 
-// SendMessage 处理一次用户发送；摘要触发轮会在摘要与回复都成功后再原子落库。
+// SendMessage handles one user turn. Background summaries never gate chat generation.
 func (s *ChatService) SendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
 	// 读取会话并校验归属当前用户
 	chat, err := s.chatStore.GetByID(chatID, userID)
@@ -134,19 +135,6 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 		}
 	}
 
-	// 摘要达到阈值时，本轮回复先缓存在内存；摘要成功后再原子落库并发送给客户端。
-	if s.summaryService != nil {
-		summaryPlan, err := s.summaryService.PlanSummaryForNextReply(chatID, history)
-		if err != nil {
-			return "", fmt.Errorf("消息摘要返回错误: %w", err)
-		}
-		if summaryPlan != nil {
-			return s.sendMessageThroughSummaryGate(
-				chatID, content, userID, preset, character, history, summaryPlan, callback,
-			)
-		}
-	}
-
 	// 把本次用户输入落库
 	userMsg := &model.Message{
 		ChatID:  chatID,
@@ -155,6 +143,10 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	}
 	if err := s.messageStore.Create(userMsg); err != nil {
 		return "", fmt.Errorf("保存用户消息失败: %w", err)
+	}
+	var summaryStage <-chan struct{}
+	if s.summaryService != nil {
+		summaryStage = s.summaryService.StartTurnSummaryAsync(chatID, userMsg.Seq)
 	}
 
 	// 组装发送给模型的完整消息列表
@@ -198,70 +190,13 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 回复失败: %w", err)
 	}
+	if s.summaryService != nil {
+		s.summaryService.FinishTurnSummaryAsync(chatID, summaryStage)
+	}
 
 	// 刷新会话的 updated_at 时间
 	_ = s.chatStore.Touch(chatID, userID)
 
-	return fullResponse, nil
-}
-
-func (s *ChatService) sendMessageThroughSummaryGate(
-	chatID string,
-	content string,
-	userID string,
-	preset *model.Preset,
-	character *model.Character,
-	history []*model.Message,
-	plan *summaryPlan,
-	callback StreamCallback,
-) (string, error) {
-	// 先生成上一段历史的摘要。失败时不请求聊天模型，也不写入本轮消息。
-	summaryContent, err := s.summaryService.GeneratePlannedSummary(plan)
-	if err != nil {
-		return "", fmt.Errorf("消息摘要返回错误: %w", err)
-	}
-	summaryContext, trimmedHistory, err := s.summaryService.BuildContextAfterPlannedSummary(plan, summaryContent, history)
-	if err != nil {
-		return "", fmt.Errorf("消息摘要返回错误: %w", err)
-	}
-	messages := s.buildMessagesWithSummaryContext(
-		chatID, preset, character, history, trimmedHistory, content, userID, summaryContext,
-	)
-
-	if DebugEnabled {
-		var msgDebug strings.Builder
-		msgDebug.WriteString(fmt.Sprintf("=== %s 摘要闸门 预设：%s (ID: %s) 消息条数: %d ===\n\n",
-			time.Now().Format("15:04:05"), preset.Name, preset.ID, len(messages)))
-		for i, m := range messages {
-			msgDebug.WriteString(fmt.Sprintf("[%d] role=%s\n%s\n\n", i, m.Role, m.Content))
-		}
-		debugFile := fmt.Sprintf("data/debug_messages_%d.txt", time.Now().UnixMilli())
-		_ = os.WriteFile(debugFile, []byte(msgDebug.String()), 0644)
-		log.Printf("[debug] 已写出摘要闸门请求消息到 %s（共 %d 条）", debugFile, len(messages))
-	}
-
-	settings, err := s.configStore.GetSettings()
-	if err != nil {
-		return "", fmt.Errorf("读取设置失败: %w", err)
-	}
-
-	// 丢弃流式增量，直到摘要成功并完成原子提交，避免用户看到最终无法落库的回复。
-	fullResponse, err := s.callFormattedOpenAIStream(settings, preset, messages, func(string) error { return nil })
-	s.debugLogResponse(chatID, fullResponse, err)
-	if err != nil {
-		return "", err
-	}
-
-	if err := s.summaryService.CommitSummaryAndExchange(plan, summaryContent, content, fullResponse); err != nil {
-		return "", fmt.Errorf("消息摘要返回错误: %w", err)
-	}
-
-	if callback != nil {
-		if err := callback(fullResponse); err != nil {
-			return "", err
-		}
-	}
-	_ = s.chatStore.Touch(chatID, userID)
 	return fullResponse, nil
 }
 
@@ -288,8 +223,15 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 		return "", fmt.Errorf("no assistant reply available for regeneration")
 	}
 
-	oldAISeq := allMessages[lastAiIdx].Seq
-	if err := s.messageStore.DeleteByID(allMessages[lastAiIdx].ID); err != nil {
+	if s.summaryService != nil {
+		if err := s.summaryService.DeleteMessageForRegeneration(
+			chatID,
+			allMessages[lastAiIdx].ID,
+			allMessages[lastAiIdx].Seq,
+		); err != nil {
+			return "", fmt.Errorf("failed to delete previous assistant reply: %w", err)
+		}
+	} else if err := s.messageStore.DeleteByID(allMessages[lastAiIdx].ID); err != nil {
 		return "", fmt.Errorf("failed to delete previous assistant reply: %w", err)
 	}
 
@@ -356,7 +298,7 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 		return "", fmt.Errorf("保存 AI 回复失败: %w", err)
 	}
 	if s.summaryService != nil {
-		s.summaryService.InvalidateFromSeq(chatID, oldAISeq)
+		s.summaryService.FinishTurnSummaryAsync(chatID, nil)
 	}
 
 	_ = s.chatStore.Touch(chatID, userID)
@@ -403,6 +345,10 @@ func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback Stre
 	if len(history) > 0 && history[len(history)-1].Role == "user" {
 		history = history[:len(history)-1]
 	}
+	var summaryStage <-chan struct{}
+	if s.summaryService != nil {
+		summaryStage = s.summaryService.StartTurnSummaryAsync(chatID, lastMessage.Seq)
+	}
 
 	messages := s.buildMessages(chatID, preset, character, history, lastUserContent, userID)
 
@@ -424,6 +370,9 @@ func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback Stre
 	}
 	if err := s.messageStore.Create(aiMsg); err != nil {
 		return "", fmt.Errorf("保存 AI 回复失败: %w", err)
+	}
+	if s.summaryService != nil {
+		s.summaryService.FinishTurnSummaryAsync(chatID, summaryStage)
 	}
 	_ = s.chatStore.Touch(chatID, userID)
 	return fullResponse, nil
@@ -901,6 +850,7 @@ func (s *ChatService) buildMessagesWithSummaryContext(
 			content := msg.Content
 			// assistant 历史内容先清洗掉隐藏思考标签
 			if msg.Role == "assistant" {
+				content, _ = statusbar.Split(content)
 				content = cleanAssistantContent(content)
 			}
 			recentHistory = append(recentHistory, model.ChatCompletionMessage{
@@ -976,6 +926,14 @@ func (s *ChatService) buildMessagesWithSummaryContext(
 		}
 		systemContent.WriteString("[Summary Memory]\nUse this condensed long-term memory to preserve continuity. It supplements recent chat history and must not be ignored.\n")
 		systemContent.WriteString(summaryContext)
+	}
+	if latestStatus := latestStatusBar(history); latestStatus != "" {
+		if systemContent.Len() > 0 {
+			systemContent.WriteString("\n\n")
+		}
+		systemContent.WriteString("[Latest Status Panel]\n")
+		systemContent.WriteString("This is the latest separately stored UI state. Use it only to preserve current time, location, condition, relationship, and event continuity. Do not treat it as dialogue or copy it into narrative prose.\n")
+		systemContent.WriteString(latestStatus)
 	}
 	roleCardPrompt := s.buildPersistentRoleCardPrompt(char, userID)
 	if roleCardPrompt != "" {
@@ -1067,6 +1025,22 @@ func (s *ChatService) buildMessagesWithSummaryContext(
 	return messages
 }
 
+func latestStatusBar(history []*model.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i] == nil || history[i].Role != "assistant" {
+			continue
+		}
+		if panel := strings.TrimSpace(history[i].StatusBar); panel != "" {
+			return panel
+		}
+		_, panel := statusbar.Split(history[i].Content)
+		if panel != "" {
+			return panel
+		}
+	}
+	return ""
+}
+
 // sortEntries 按 Order 字段升序排序（稳定插入排序）。
 func sortEntries(entries []model.PromptEntry) {
 	for i := 1; i < len(entries); i++ {
@@ -1082,7 +1056,7 @@ const statusBarEntryKey = "状态栏"
 
 // statusBarInstruction 是对 AI 的固定约束指令，固化在程序里，用户不可见也不可改。
 // 用户在世界书条目里编辑的内容只作为“状态栏样式/包裹方式”，注入时拼在这段约束之后。
-const statusBarInstruction = "【系统指令｜状态栏】每次回复的最后，都必须另起一段，严格按下面给出的样式输出当前状态栏。请根据当前剧情如实填写每一项，不要保留方括号占位文字，不要省略，也不要把本条系统指令本身写进回复。状态栏样式如下：\n"
+const statusBarInstruction = "【系统指令｜状态栏】每次回复的最后，都必须另起一段，严格按下面给出的样式输出当前状态栏。状态栏第一行必须且只能保留一个固定标题【状态栏】，即使自定义样式省略或修改了标题也不能改变这个固定标题。请根据当前剧情如实填写每一项，不要保留方括号占位文字，不要省略，也不要把本条系统指令本身写进回复。状态栏样式如下：\n"
 
 // statusBarFenceRe 匹配用户样式中用三个反引号或三个单引号包裹的代码块围栏。
 var statusBarFenceRe = regexp.MustCompile("(?m)^[ \\t]*(?:```|''')[^\\n]*\\n?")
@@ -1308,6 +1282,7 @@ var (
 
 func (s *ChatService) callFormattedOpenAIStream(settings *model.AppSettings, preset *model.Preset, messages []model.ChatCompletionMessage, callback StreamCallback) (string, error) {
 	attemptMessages := append([]model.ChatCompletionMessage(nil), messages...)
+	requireStatusBar := messagesRequireStatusBar(messages)
 	var lastResponse string
 	var lastFormatErr error
 
@@ -1318,7 +1293,7 @@ func (s *ChatService) callFormattedOpenAIStream(settings *model.AppSettings, pre
 			return response, err
 		}
 
-		if formatErr := validateAssistantReplyFormat(response); formatErr == nil {
+		if formatErr := validateAssistantReplyFormat(response, requireStatusBar); formatErr == nil {
 			if callback != nil && response != "" {
 				if err := callback(response); err != nil {
 					return response, err
@@ -1357,7 +1332,16 @@ func appendFormatRetryMessages(messages []model.ChatCompletionMessage, previous 
 	return retryMessages
 }
 
-func validateAssistantReplyFormat(response string) error {
+func messagesRequireStatusBar(messages []model.ChatCompletionMessage) bool {
+	for _, message := range messages {
+		if strings.Contains(message.Content, "【系统指令｜状态栏】") {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAssistantReplyFormat(response string, requireStatusBar bool) error {
 	cleaned := strings.TrimSpace(cleanAssistantContent(response))
 	if cleaned == "" {
 		return fmt.Errorf("empty response")
@@ -1379,6 +1363,9 @@ func validateAssistantReplyFormat(response string) error {
 	}
 	if formattedReplyMetaRe.MatchString(cleaned) {
 		return fmt.Errorf("contains meta commentary")
+	}
+	if requireStatusBar && strings.Count(cleaned, statusbar.Marker) != 1 {
+		return fmt.Errorf("missing or duplicated required status panel marker")
 	}
 	if !hasEvenUnescapedDoubleQuotes(cleaned) {
 		return fmt.Errorf("has unbalanced double quotes")
