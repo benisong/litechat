@@ -12,6 +12,7 @@ export default function ChatInput({ onSend, disabled }) {
   const [text, setText] = useState('')
   const [activeTool, setActiveTool] = useState('colon')
   const textareaRef = useRef(null)
+  const sendingRef = useRef(false)
 
   // 自动调整高度
   useEffect(() => {
@@ -23,7 +24,11 @@ export default function ChatInput({ onSend, disabled }) {
 
   const handleSend = async () => {
     const content = text.trim()
-    if (!content || disabled) return
+    if (!content || disabled || sendingRef.current) return
+
+    // React props are refreshed on the next render. A synchronous ref closes
+    // the small window in which a double tap / repeated Enter could submit twice.
+    sendingRef.current = true
     setText('')
     setActiveTool('colon')
     // 重置高度
@@ -34,12 +39,14 @@ export default function ChatInput({ onSend, disabled }) {
       await onSend(content)
     } catch (err) {
       if (err?.canResend) setText(content)
+    } finally {
+      sendingRef.current = false
     }
   }
 
   const handleKeyDown = (e) => {
     // Enter 发送，Shift+Enter 换行
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !e.repeat) {
       e.preventDefault()
       void handleSend()
     }

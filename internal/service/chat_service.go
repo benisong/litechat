@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"litechat/internal/model"
@@ -16,8 +17,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var ErrChatBusy = errors.New("该对话正在生成回复，请稍候")
 
 // ChatService 聊天服务：封装会话、角色卡、预设、世界书与摘要，串起整条聊天链路。
 type ChatService struct {
@@ -29,6 +33,8 @@ type ChatService struct {
 	configStore    *store.ConfigStore
 	userStore      *store.UserStore
 	summaryService *SummaryService
+	turnMu         sync.Mutex
+	activeTurns    map[string]struct{}
 }
 
 func NewChatService(
@@ -50,14 +56,42 @@ func NewChatService(
 		configStore:    configStore,
 		userStore:      userStore,
 		summaryService: summaryService,
+		activeTurns:    make(map[string]struct{}),
 	}
 }
 
 // StreamCallback SSE 流式回调：每生成一个增量 token 就回调一次，用于边生成边推送。
 type StreamCallback func(token string) error
 
+func (s *ChatService) beginTurn(chatID string) bool {
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+	if s.activeTurns == nil {
+		s.activeTurns = make(map[string]struct{})
+	}
+	if _, exists := s.activeTurns[chatID]; exists {
+		return false
+	}
+	s.activeTurns[chatID] = struct{}{}
+	return true
+}
+
+func (s *ChatService) finishTurn(chatID string) {
+	s.turnMu.Lock()
+	delete(s.activeTurns, chatID)
+	s.turnMu.Unlock()
+}
+
 // SendMessage handles one user turn. Background summaries never gate chat generation.
 func (s *ChatService) SendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
+	if !s.beginTurn(chatID) {
+		return "", ErrChatBusy
+	}
+	defer s.finishTurn(chatID)
+	return s.sendMessage(chatID, content, presetID, userID, callback)
+}
+
+func (s *ChatService) sendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
 	// 读取会话并校验归属当前用户
 	chat, err := s.chatStore.GetByID(chatID, userID)
 	if err != nil {
@@ -202,6 +236,14 @@ func (s *ChatService) SendMessage(chatID, content, presetID, userID string, call
 
 // Regenerate 重新生成最后一条 AI 回复：删除旧回复，用同一条用户输入重新请求模型。
 func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback) (string, error) {
+	if !s.beginTurn(chatID) {
+		return "", ErrChatBusy
+	}
+	defer s.finishTurn(chatID)
+	return s.regenerate(chatID, userID, callback)
+}
+
+func (s *ChatService) regenerate(chatID, userID string, callback StreamCallback) (string, error) {
 	// 读取全部消息
 	allMessages, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
@@ -308,6 +350,11 @@ func (s *ChatService) Regenerate(chatID, userID string, callback StreamCallback)
 // RetryLastOrRegenerate 在“重试”和“重新生成”之间自动选择：
 // 末尾是 AI 回复就重新生成；末尾是用户消息就直接用它再请求一次。
 func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback StreamCallback) (string, error) {
+	if !s.beginTurn(chatID) {
+		return "", ErrChatBusy
+	}
+	defer s.finishTurn(chatID)
+
 	allMessages, err := s.messageStore.ListForContext(chatID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load messages: %w", err)
@@ -318,7 +365,7 @@ func (s *ChatService) RetryLastOrRegenerate(chatID, userID string, callback Stre
 
 	lastMessage := allMessages[len(allMessages)-1]
 	if lastMessage.Role == "assistant" {
-		return s.Regenerate(chatID, userID, callback)
+		return s.regenerate(chatID, userID, callback)
 	}
 	if lastMessage.Role != "user" {
 		return "", fmt.Errorf("最后一条消息既不是用户消息也不是 AI 回复，无法重试")
@@ -1296,7 +1343,9 @@ func (s *ChatService) callFormattedOpenAIStream(settings *model.AppSettings, pre
 		if formatErr := validateAssistantReplyFormat(response, requireStatusBar); formatErr == nil {
 			if callback != nil && response != "" {
 				if err := callback(response); err != nil {
-					return response, err
+					// The model response is already complete. A tab switch or
+					// disconnected browser must not prevent it from being saved.
+					log.Printf("[chat] client stream delivery failed; persisting response: %v", err)
 				}
 			}
 			return response, nil

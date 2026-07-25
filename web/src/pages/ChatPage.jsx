@@ -45,6 +45,7 @@ export default function ChatPage() {
   const messagesContainerRef = useRef(null)
   const stickToBottomRef = useRef(true)
   const touchStartYRef = useRef(null)
+  const lastResumeSyncRef = useRef(0)
 
   const getDistanceToBottom = () => {
     const container = messagesContainerRef.current
@@ -159,22 +160,33 @@ export default function ChatPage() {
       })
     }
 
-    const handleVisibilityChange = () => {
-      if (!document.hidden) restoreBottomActions()
+    const syncAfterResume = () => {
+      restoreBottomActions()
+
+      // focus, pageshow and visibilitychange often fire together. Coalesce
+      // them into one quiet server reconciliation.
+      const now = Date.now()
+      if (now - lastResumeSyncRef.current < 300) return
+      lastResumeSyncRef.current = now
+      fetchMessages(chatId, { background: true }).catch(() => {})
     }
 
-    window.addEventListener('focus', restoreBottomActions)
-    window.addEventListener('pageshow', restoreBottomActions)
+    const handleVisibilityChange = () => {
+      if (!document.hidden) syncAfterResume()
+    }
+
+    window.addEventListener('focus', syncAfterResume)
+    window.addEventListener('pageshow', syncAfterResume)
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.visualViewport?.addEventListener('resize', restoreBottomActions)
 
     return () => {
-      window.removeEventListener('focus', restoreBottomActions)
-      window.removeEventListener('pageshow', restoreBottomActions)
+      window.removeEventListener('focus', syncAfterResume)
+      window.removeEventListener('pageshow', syncAfterResume)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.visualViewport?.removeEventListener('resize', restoreBottomActions)
     }
-  }, [])
+  }, [chatId, fetchMessages])
 
   const handleSend = async content => {
     stickToBottomRef.current = true
@@ -320,7 +332,7 @@ export default function ChatPage() {
         </button>
       )}
 
-      <ChatInput onSend={handleSend} disabled={streaming} />
+      <ChatInput onSend={handleSend} disabled={loading || streaming} />
 
       <Modal open={showMenu} onClose={() => setShowMenu(false)} title="对话操作">
         <div className="space-y-2">

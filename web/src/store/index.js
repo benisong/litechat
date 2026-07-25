@@ -6,6 +6,22 @@ import { normalizeChatMessages } from '../utils/statusBar'
 const BASE = '/api'
 const AUTH_STORAGE_KEY = 'litechat-auth'
 const authStorage = createJSONStorage(() => sessionStorage)
+let messageFetchSerial = 0
+let tempMessageSerial = 0
+const sendingChatIds = new Set()
+
+function createTempMessageId(prefix) {
+  tempMessageSerial += 1
+  const randomPart = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${tempMessageSerial}`
+  return `${prefix}-${randomPart}`
+}
+
+function chatBusyError() {
+  const error = new Error('上一条消息仍在发送，请稍候')
+  error.code = 'CHAT_BUSY'
+  error.canResend = true
+  return error
+}
 
 const DEFAULT_SETTINGS = {
   api_endpoint: 'https://api.openai.com/v1',
@@ -204,9 +220,13 @@ export const useCharacterStore = create((set, get) => ({
 export const useChatStore = create((set, get) => ({
   chats: [],
   currentChat: null,
+  activeChatId: null,
   messages: [],
   loading: false,
   streaming: false,
+  streamingChatId: null,
+  streamKind: null,
+  streamBaseSeq: 0,
   streamContent: '',
 
   fetchChats: async (characterId) => {
@@ -224,34 +244,118 @@ export const useChatStore = create((set, get) => ({
     return data
   },
 
-  setCurrentChat: (chat) => set({ currentChat: chat, messages: [] }),
+  setCurrentChat: (chat) => set({
+    currentChat: chat,
+    activeChatId: chat?.id || null,
+    messages: [],
+  }),
 
-  fetchMessages: async (chatId) => {
-    set({ loading: true })
+  fetchMessages: async (chatId, { background = false } = {}) => {
+    if (background && get().activeChatId !== chatId) {
+      return []
+    }
+
+    const fetchSerial = ++messageFetchSerial
+    set(s => ({
+      activeChatId: chatId,
+      ...(s.activeChatId !== chatId ? { messages: [] } : {}),
+      ...(!background ? { loading: true } : {}),
+    }))
+
     try {
       const data = await apiFetch(`/chats/${chatId}/messages`)
-      set({ messages: normalizeChatMessages(data) })
+      const normalizedMessages = normalizeChatMessages(data)
+      set(s => {
+        if (fetchSerial !== messageFetchSerial || s.activeChatId !== chatId) {
+          return {}
+        }
+
+        // An older GET may finish after an optimistic send has started. Never
+        // let that stale snapshot erase the just-sent message or its placeholder.
+        if (s.streaming && s.streamingChatId === chatId) {
+          if (background && s.streamKind === 'send') {
+            const persistedUser = normalizedMessages.find(message => (
+              message.seq > s.streamBaseSeq && message.role === 'user'
+            ))
+            if (persistedUser) {
+              const persistedAssistant = normalizedMessages.find(message => (
+                message.seq > persistedUser.seq && message.role === 'assistant'
+              ))
+              if (persistedAssistant) {
+                return {
+                  messages: normalizedMessages,
+                  streaming: false,
+                  streamingChatId: null,
+                  streamKind: null,
+                  streamBaseSeq: 0,
+                  streamContent: '',
+                }
+              }
+
+              const aiPlaceholder = s.messages.find(message => (
+                message.chat_id === chatId
+                && message.role === 'assistant'
+                && message.isStreaming
+              ))
+              return {
+                messages: aiPlaceholder
+                  ? [...normalizedMessages, aiPlaceholder]
+                  : normalizedMessages,
+              }
+            }
+          }
+          return {}
+        }
+
+        return { messages: normalizedMessages }
+      })
+      return normalizedMessages
     } finally {
-      set({ loading: false })
+      set(s => (
+        fetchSerial === messageFetchSerial && s.activeChatId === chatId
+          ? { loading: false }
+          : {}
+      ))
     }
   },
 
   // 发送消息（SSE 流式）
   sendMessage: async (chatId, content, presetId) => {
+    if (sendingChatIds.has(chatId) || get().streaming) {
+      throw chatBusyError()
+    }
+    sendingChatIds.add(chatId)
+
     const userMsg = {
-      id: 'temp-' + Date.now(),
+      id: createTempMessageId('temp-user'),
       chat_id: chatId,
       role: 'user',
       content,
       created_at: new Date().toISOString(),
     }
-    set(s => ({ messages: [...s.messages, userMsg], streaming: true, streamContent: '' }))
+    set(s => ({
+      activeChatId: chatId,
+      messages: [
+        ...(s.activeChatId === chatId ? s.messages : []),
+        userMsg,
+      ],
+      streaming: true,
+      streamingChatId: chatId,
+      streamKind: 'send',
+      streamBaseSeq: s.activeChatId === chatId
+        ? s.messages.reduce(
+            (latest, message) => Math.max(latest, Number(message.seq) || 0),
+            0
+          )
+        : 0,
+      streamContent: '',
+    }))
 
     const requestStartedAt = Date.now()
 
     // 先添加一个空的 AI 消息占位
     const aiMsgPlaceholder = {
-      id: 'temp-ai-' + Date.now(),
+      id: createTempMessageId('temp-ai'),
       chat_id: chatId,
       role: 'assistant',
       content: '',
@@ -270,6 +374,10 @@ export const useChatStore = create((set, get) => ({
         headers: sseHeaders,
         body: JSON.stringify({ content, preset_id: presetId || '' }),
       })
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `发送失败（HTTP ${res.status}）`)
+      }
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -331,14 +439,34 @@ export const useChatStore = create((set, get) => ({
               ? { ...message, response_time_seconds: responseTimeSeconds }
               : message
           ))
-      set({ messages: hydratedMessages, streaming: false, streamContent: '' })
-    } catch (err) {
       set(s => ({
-        messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id),
+        ...(s.activeChatId === chatId ? { messages: hydratedMessages } : {}),
         streaming: false,
+        streamingChatId: null,
+        streamKind: null,
+        streamBaseSeq: 0,
         streamContent: '',
       }))
+    } catch (err) {
+      set(s => ({
+        ...(s.activeChatId === chatId
+          ? { messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id) }
+          : {}),
+        streaming: false,
+        streamingChatId: null,
+        streamKind: null,
+        streamBaseSeq: 0,
+        streamContent: '',
+      }))
+
+      // The server saves the user message before asking the model. Reconcile
+      // after a broken connection so the optimistic row becomes the real row.
+      try {
+        await get().fetchMessages(chatId, { background: true })
+      } catch {}
       throw err
+    } finally {
+      sendingChatIds.delete(chatId)
     }
   },
 
@@ -362,7 +490,19 @@ export const useChatStore = create((set, get) => ({
 
   // 重新生成：后端删除最后一条 AI 回复并重新请求（不重复发送用户消息）
   regenerate: async (chatId) => {
-    set(s => ({ streaming: true, streamContent: '' }))
+    if (sendingChatIds.has(chatId) || get().streaming) {
+      throw chatBusyError()
+    }
+    sendingChatIds.add(chatId)
+
+    set({
+      activeChatId: chatId,
+      streaming: true,
+      streamingChatId: chatId,
+      streamKind: 'regenerate',
+      streamBaseSeq: 0,
+      streamContent: '',
+    })
 
     const requestStartedAt = Date.now()
 
@@ -386,6 +526,10 @@ export const useChatStore = create((set, get) => ({
         method: 'POST',
         headers: sseHeaders,
       })
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `重新生成失败（HTTP ${res.status}）`)
+      }
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -437,13 +581,30 @@ export const useChatStore = create((set, get) => ({
               ? { ...message, response_time_seconds: responseTimeSeconds }
               : message
           ))
-      set({ messages: hydratedMessages, streaming: false, streamContent: '' })
+      set(s => ({
+        ...(s.activeChatId === chatId ? { messages: hydratedMessages } : {}),
+        streaming: false,
+        streamingChatId: null,
+        streamKind: null,
+        streamBaseSeq: 0,
+        streamContent: '',
+      }))
     } catch (err) {
       set(s => ({
-        messages: s.messages.filter(m => m.id !== aiPlaceholder.id),
+        ...(s.activeChatId === chatId
+          ? { messages: s.messages.filter(m => m.id !== aiPlaceholder.id) }
+          : {}),
         streaming: false,
+        streamingChatId: null,
+        streamKind: null,
+        streamBaseSeq: 0,
       }))
+      try {
+        await get().fetchMessages(chatId, { background: true })
+      } catch {}
       throw err
+    } finally {
+      sendingChatIds.delete(chatId)
     }
   },
 }))
