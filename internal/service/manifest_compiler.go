@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const manifestSchemaVersion = 1
+
 type ManifestCompileInput struct {
 	CharacterID          string
 	CharacterVersion     string
@@ -63,7 +65,7 @@ func (c *ManifestCompiler) CompileOrReuse(ctx context.Context, input ManifestCom
 	if c == nil || c.storyStore == nil {
 		return nil, fmt.Errorf("manifest compiler is not configured")
 	}
-	if cached, err := c.storyStore.GetReadyManifest(input.CharacterID, input.CharacterVersion, input.WorldbookVersionHash); err == nil {
+	if cached, err := c.storyStore.GetReadyManifest(input.CharacterID, input.CharacterVersion, input.WorldbookVersionHash, input.CompilerModel, input.PromptVersion, fmt.Sprint(manifestSchemaVersion)); err == nil {
 		return cached, nil
 	}
 	return c.Compile(ctx, input)
@@ -72,7 +74,7 @@ func (c *ManifestCompiler) CompileOrReuse(ctx context.Context, input ManifestCom
 func (c *ManifestCompiler) Compile(ctx context.Context, input ManifestCompileInput) (*model.StoryManifest, error) {
 	manifest := &model.StoryManifest{
 		CharacterID: input.CharacterID, CharacterVersion: input.CharacterVersion,
-		WorldbookVersionHash: input.WorldbookVersionHash, ManifestVersion: 1,
+		WorldbookVersionHash: input.WorldbookVersionHash, ManifestVersion: manifestSchemaVersion,
 		CompilerModel: input.CompilerModel, PromptVersion: input.PromptVersion,
 	}
 	if c == nil || c.storyStore == nil || c.client == nil {

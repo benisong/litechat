@@ -1,31 +1,36 @@
 package store
 
 import (
-	"litechat/internal/model"
+	"database/sql"
 	"testing"
 )
 
-func TestGetReadyManifestByCharacterAndWorldbookVersion(t *testing.T) {
+func TestGetReadyManifestStrictCompilerCriteria(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	defer db.Close()
-	store := NewSchedulerStore(db)
-
-	ready := &model.StoryManifest{CharacterID: "char-1", CharacterVersion: "v2", WorldbookVersionHash: "hash-2", CompiledJSON: `{"manifest_version":1,"fields":{"x":{"type":"boolean","writable":true}},"observation_rules":[]}`}
-	if err := store.CreateManifest(ready); err != nil {
-		t.Fatalf("CreateManifest ready: %v", err)
-	}
-	if err := store.MarkManifestReady(ready.ID, ready.CompiledJSON, "prompt-v1", "smart-model"); err != nil {
-		t.Fatalf("MarkManifestReady: %v", err)
-	}
-
-	got, err := store.GetReadyManifest("char-1", "v2", "hash-2")
+	_, err := db.Exec(`
+		INSERT INTO story_manifests (id, character_id, character_version, worldbook_version_hash, manifest_version, status, compiled_json, compiler_model, prompt_version)
+		VALUES
+		('manifest-model-a', 'character-1', 'v1', 'hash-1', 1, 'ready', '{}', 'model-a', 'prompt-1'),
+		('manifest-model-b', 'character-1', 'v1', 'hash-1', 1, 'ready', '{}', 'model-b', 'prompt-2');`)
 	if err != nil {
-		t.Fatalf("GetReadyManifest: %v", err)
+		t.Fatalf("seed: %v", err)
 	}
-	if got.ID != ready.ID || got.Status != model.ManifestStatusReady {
-		t.Fatalf("unexpected cached manifest: %+v", got)
+	store := NewSchedulerStore(db)
+	manifest, err := store.GetReadyManifest("character-1", "v1", "hash-1", "model-b", "prompt-2")
+	if err != nil {
+		t.Fatalf("strict lookup: %v", err)
 	}
-	if _, err := store.GetReadyManifest("char-1", "v1", "hash-2"); err == nil {
-		t.Fatal("expected version mismatch to miss cache")
+	if manifest.ID != "manifest-model-b" {
+		t.Fatalf("got %s, want manifest-model-b", manifest.ID)
+	}
+	if _, err := store.GetReadyManifest("character-1", "v1", "hash-1", "model-b", "prompt-2", "999"); err == nil {
+		t.Fatal("unexpected cache hit for incompatible manifest schema")
+	}
+	if _, err := store.GetReadyManifest("character-1", "v1", "hash-1", "model-c", "prompt-2"); err == nil || err == sql.ErrNoRows {
+		// sql.ErrNoRows is the expected miss; any other nil result is a cache bug.
+		if err == nil {
+			t.Fatal("unexpected cache hit for unknown compiler criteria")
+		}
 	}
 }

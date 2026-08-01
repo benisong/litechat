@@ -216,8 +216,8 @@ func (db *DB) InitSchema() error {
 		created_at                 DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at                 DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
-	CREATE INDEX IF NOT EXISTS idx_story_manifests_character_version
-		ON story_manifests(character_id, character_version, worldbook_version_hash, status);
+	CREATE INDEX IF NOT EXISTS idx_story_manifests_cache_key
+		ON story_manifests(character_id, character_version, worldbook_version_hash, compiler_model, prompt_version, status, updated_at);
 
 	-- 每个复杂剧情聊天独立的动态状态
 	CREATE TABLE IF NOT EXISTS chat_story_states (

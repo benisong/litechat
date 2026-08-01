@@ -69,16 +69,26 @@ func (s *SchedulerStore) GetManifest(id string) (*model.StoryManifest, error) {
 	return manifest, nil
 }
 
-func (s *SchedulerStore) GetReadyManifest(characterID, characterVersion, worldbookVersionHash string) (*model.StoryManifest, error) {
+func (s *SchedulerStore) GetReadyManifest(characterID, characterVersion, worldbookVersionHash string, compilerCriteria ...string) (*model.StoryManifest, error) {
 	manifest := &model.StoryManifest{}
-	err := s.db.QueryRow(`
-		SELECT id, character_id, character_version, worldbook_version_hash, manifest_version,
-		       status, compiled_json, compiler_model, prompt_version, error_message, created_at, updated_at
-		FROM story_manifests
-		WHERE character_id = ? AND character_version = ? AND worldbook_version_hash = ? AND status = ?
-		ORDER BY updated_at DESC LIMIT 1`,
-		characterID, characterVersion, worldbookVersionHash, model.ManifestStatusReady,
-	).Scan(&manifest.ID, &manifest.CharacterID, &manifest.CharacterVersion, &manifest.WorldbookVersionHash,
+	query := `SELECT id, character_id, character_version, worldbook_version_hash, manifest_version,
+		status, compiled_json, compiler_model, prompt_version, error_message, created_at, updated_at
+		FROM story_manifests WHERE character_id = ? AND character_version = ? AND worldbook_version_hash = ? AND status = ?`
+	args := []any{characterID, characterVersion, worldbookVersionHash, model.ManifestStatusReady}
+	if len(compilerCriteria) > 0 && compilerCriteria[0] != "" {
+		query += " AND compiler_model = ?"
+		args = append(args, compilerCriteria[0])
+	}
+	if len(compilerCriteria) > 1 && compilerCriteria[1] != "" {
+		query += " AND prompt_version = ?"
+		args = append(args, compilerCriteria[1])
+	}
+	if len(compilerCriteria) > 2 && compilerCriteria[2] != "" {
+		query += " AND manifest_version = ?"
+		args = append(args, compilerCriteria[2])
+	}
+	query += " ORDER BY updated_at DESC LIMIT 1"
+	err := s.db.QueryRow(query, args...).Scan(&manifest.ID, &manifest.CharacterID, &manifest.CharacterVersion, &manifest.WorldbookVersionHash,
 		&manifest.ManifestVersion, &manifest.Status, &manifest.CompiledJSON, &manifest.CompilerModel,
 		&manifest.PromptVersion, &manifest.ErrorMessage, &manifest.CreatedAt, &manifest.UpdatedAt)
 	if err != nil {
