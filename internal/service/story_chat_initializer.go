@@ -99,6 +99,12 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 	return &StoryChatInitializeResult{Chat: chat, Manifest: manifest, State: state}, nil
 }
 
+func (i *StoryChatInitializer) DeleteChatData(chatID string) error {
+	if i == nil || i.storyStore == nil {
+		return fmt.Errorf("story initializer is not configured")
+	}
+	return i.storyStore.DeleteChatStoryData(chatID)
+}
 func (i *StoryChatInitializer) RetryManifest(ctx context.Context, userID, manifestID string, input ManifestCompileInput) (*model.StoryManifest, error) {
 	if i == nil || i.compiler == nil || i.storyStore == nil || i.characterStore == nil {
 		return nil, fmt.Errorf("story chat initializer is not configured")

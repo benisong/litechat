@@ -200,6 +200,8 @@ export default function ChatPage() {
     }
   }
 
+  const isStoryChat = Boolean(chat?.scheduler_enabled || chat?.schedulerEnabled)
+
   const latestUserMessageId = !streaming
     ? [...messages].reverse().find(msg => msg.role === 'user')?.id || null
     : null
@@ -312,9 +314,9 @@ export default function ChatPage() {
             message={msg}
             character={character}
             statusBarStyle={{ bg: chat?.status_bar_bg, fg: chat?.status_bar_fg }}
-            onRegenerate={msg.id === latestAssistantMessageId ? handleRegenerate : undefined}
-            onRetry={msg.id === latestUserMessageId ? handleRetryLastRequest : undefined}
-            onDeleteCascade={msgId => deleteMessageCascade(chatId, msgId)}
+            onRegenerate={!isStoryChat && msg.id === latestAssistantMessageId ? handleRegenerate : undefined}
+            onRetry={!isStoryChat && msg.id === latestUserMessageId ? handleRetryLastRequest : undefined}
+            onDeleteCascade={!isStoryChat ? msgId => deleteMessageCascade(chatId, msgId) : undefined}
           />
         ))}
 

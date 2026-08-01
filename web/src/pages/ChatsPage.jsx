@@ -122,7 +122,7 @@ export default function ChatsPage() {
                   )}
                 </div>
               </div>
-              {/* 删除按钮 */}
+              {/* 删除对话：复杂剧情也允许删除整个会话 */}
               <button
                 onClick={e => handleDelete(chat.id, e)}
                 className="p-2 text-gray-600 hover:text-red-400 transition-colors rounded-lg"

@@ -823,10 +823,34 @@ func (h *Handlers) GetChat(c *gin.Context) {
 	c.JSON(http.StatusOK, chat)
 }
 
+func (h *Handlers) rejectStoryMutation(c *gin.Context, chatID, userID string) bool {
+	chat, err := h.chatStore.GetByID(chatID, userID)
+	if err != nil {
+		return false
+	}
+	if !chat.SchedulerEnabled {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{"error": "复杂剧情 V1 不支持删除或重新生成消息，请使用剧情专用流程"})
+	return true
+}
+
 // DeleteChat DELETE /api/chats/:id
 func (h *Handlers) DeleteChat(c *gin.Context) {
 	userID := GetUserID(c)
 	chatID := c.Param("id")
+	chat, err := h.chatStore.GetByID(chatID, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	if chat.SchedulerEnabled && h.storyInitializer != nil {
+		if err := h.storyInitializer.DeleteChatData(chatID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	if h.summaryService != nil {
 		h.summaryService.ForgetChat(chatID)
 	}
@@ -924,8 +948,13 @@ func (h *Handlers) DeleteMessage(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
 		return
 	}
-	if _, err := h.chatStore.GetByID(msg.ChatID, userID); err != nil {
+	chat, err := h.chatStore.GetByID(msg.ChatID, userID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	if chat.SchedulerEnabled {
+		c.JSON(http.StatusConflict, gin.H{"error": "复杂剧情 V1 不支持删除消息"})
 		return
 	}
 
@@ -948,8 +977,13 @@ func (h *Handlers) DeleteMessageCascade(c *gin.Context) {
 	userID := GetUserID(c)
 
 	// 验证对话属于当前用户
-	if _, err := h.chatStore.GetByID(chatID, userID); err != nil {
+	chat, err := h.chatStore.GetByID(chatID, userID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+	if chat.SchedulerEnabled {
+		c.JSON(http.StatusConflict, gin.H{"error": "复杂剧情 V1 不支持级联删除消息"})
 		return
 	}
 
@@ -980,6 +1014,9 @@ func (h *Handlers) DeleteMessageCascade(c *gin.Context) {
 func (h *Handlers) RegenerateMessage(c *gin.Context) {
 	chatID := c.Param("id")
 	userID := GetUserID(c)
+	if h.rejectStoryMutation(c, chatID, userID) {
+		return
+	}
 
 	// 设置 SSE 头
 	c.Header("Content-Type", "text/event-stream")

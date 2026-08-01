@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"litechat/internal/model"
 	"litechat/internal/store"
+	"sync"
 )
 
 type StoryPrimaryClient interface {
@@ -41,6 +43,8 @@ type StoryChatRuntime struct {
 	primaryClient StoryPrimaryClient
 	turnProcessor StoryTurnProcessor
 	primaryModel  string
+	turnMu        sync.Mutex
+	activeTurns   map[string]struct{}
 }
 
 type StoryChatRuntimeDeps struct {
@@ -61,6 +65,25 @@ func NewStoryChatRuntime(deps StoryChatRuntimeDeps) *StoryChatRuntime {
 	}
 }
 
+func (r *StoryChatRuntime) beginTurn(chatID string) bool {
+	r.turnMu.Lock()
+	defer r.turnMu.Unlock()
+	if r.activeTurns == nil {
+		r.activeTurns = make(map[string]struct{})
+	}
+	if _, exists := r.activeTurns[chatID]; exists {
+		return false
+	}
+	r.activeTurns[chatID] = struct{}{}
+	return true
+}
+
+func (r *StoryChatRuntime) finishTurn(chatID string) {
+	r.turnMu.Lock()
+	delete(r.activeTurns, chatID)
+	r.turnMu.Unlock()
+}
+
 func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
 	return r.SendMessageWithEvents(ctx, input, callback, nil)
 }
@@ -76,6 +99,10 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	if !chat.SchedulerEnabled {
 		return ChatRuntimeResult{}, errors.New("chat is not configured for story runtime")
 	}
+	if !r.beginTurn(input.ChatID) {
+		return ChatRuntimeResult{}, fmt.Errorf("story chat is busy")
+	}
+	defer r.finishTurn(input.ChatID)
 	state, err := r.storyStore.GetStoryState(input.ChatID)
 	if err != nil {
 		return ChatRuntimeResult{}, errors.New("story runtime is not initialized")
@@ -111,6 +138,7 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	}
 	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, messages, spec)
 	if err != nil {
+		_ = r.storyStore.MarkStoryTurnFailed(record.ChatID, record.ID, "processor_error", err.Error())
 		event := StoryRuntimeStatusEvent{Status: "failed", RecordID: record.ID, ErrorMessage: err.Error()}
 		if statusCallback != nil {
 			_ = statusCallback(event)
