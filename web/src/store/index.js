@@ -239,7 +239,8 @@ export const useChatStore = create((set, get) => ({
 
   createStoryChat: async (input) => {
     const data = await apiFetch('/story/chats', { method: 'POST', body: input })
-    set(s => ({ chats: data.chat ? [data.chat, ...s.chats] : s.chats }))
+    const chat = data.chat || data.Chat
+    set(s => ({ chats: chat ? [chat, ...s.chats] : s.chats }))
     return data
   },
 

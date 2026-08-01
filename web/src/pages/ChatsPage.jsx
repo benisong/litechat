@@ -55,8 +55,9 @@ export default function ChatsPage() {
         prompt_version: 'story-manifest-v1',
         compile_only_text: character.description || '',
       })
+      const chat = result.chat || result.Chat
       setShowNewChat(false)
-      navigate(`/chats/${result.chat?.id || result.id}`)
+      navigate(`/chats/${chat?.id || chat?.ID || result.id || result.ID}`)
     } catch (err) {
       showToast(err.message || '复杂剧情初始化失败', 'error')
     }
