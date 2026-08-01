@@ -43,10 +43,19 @@ type ManifestStoryTurnProcessor struct {
 	scheduler     *SchedulerService
 	modelName     string
 	promptVersion string
+	messageStore  *store.MessageStore
+	promptBuilder *SchedulerPromptBuilder
 }
 
 func NewManifestStoryTurnProcessor(storyStore *store.SchedulerStore, scheduler *SchedulerService, modelName, promptVersion string) *ManifestStoryTurnProcessor {
 	return &ManifestStoryTurnProcessor{storyStore: storyStore, scheduler: scheduler, modelName: modelName, promptVersion: promptVersion}
+}
+
+func NewManifestStoryTurnProcessorWithMessages(storyStore *store.SchedulerStore, messageStore *store.MessageStore, scheduler *SchedulerService, modelName, promptVersion string, promptBuilder *SchedulerPromptBuilder) *ManifestStoryTurnProcessor {
+	processor := NewManifestStoryTurnProcessor(storyStore, scheduler, modelName, promptVersion)
+	processor.messageStore = messageStore
+	processor.promptBuilder = promptBuilder
+	return processor
 }
 
 func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
@@ -84,7 +93,22 @@ func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
 		}
 	}
 
-	output, err := p.scheduler.Process(ctx, record, p.modelName, p.promptVersion, messages, spec)
+	schedulerMessages := messages
+	if p.messageStore != nil && p.promptBuilder != nil {
+		userMessage, userErr := p.messageStore.GetByID(record.UserMessageID)
+		assistantMessage, assistantErr := p.messageStore.GetByID(record.AssistantMessageID)
+		if userErr != nil || assistantErr != nil {
+			if userErr != nil {
+				return p.fail(record.ID, "message_error", userErr)
+			}
+			return p.fail(record.ID, "message_error", assistantErr)
+		}
+		schedulerMessages, err = p.promptBuilder.Build(userMessage.Content, assistantMessage.Content, state, manifest.CompiledJSON, spec)
+		if err != nil {
+			return p.fail(record.ID, "scheduler_prompt_error", err)
+		}
+	}
+	output, err := p.scheduler.Process(ctx, record, p.modelName, p.promptVersion, schedulerMessages, spec)
 	if err != nil {
 		return StoryProcessResult{Status: string(model.SchedulerStatusFailed), RecordID: record.ID, ErrorMessage: err.Error()}, err
 	}

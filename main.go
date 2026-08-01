@@ -65,6 +65,26 @@ func main() {
 	storyCompiler := service.NewManifestCompiler(storyStore, service.NewOpenAICompletionClient(settings))
 	storySourceProvider := service.NewWorldBookStorySourceProvider(worldBookStore)
 	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler, storySourceProvider)
+	storyPromptBuilder := service.NewDefaultStoryPromptBuilder(characterStore, worldBookStore, presetStore)
+	storySchedulerClient := service.NewOpenAICompletionClient(settings)
+	schedulerModel := settings.MemoryModel
+	if schedulerModel == "" {
+		schedulerModel = settings.DefaultModel
+	}
+	if schedulerModel == "" {
+		schedulerModel = "story-scheduler"
+	}
+	storyScheduler := service.NewSchedulerService(storyStore, storySchedulerClient)
+	storyProcessor := service.NewManifestStoryTurnProcessorWithMessages(storyStore, messageStore, storyScheduler, schedulerModel, "scheduler-v1", service.NewSchedulerPromptBuilder())
+	primaryModel := settings.DefaultModel
+	if !settings.UseDefaultModelForCharacterCard && settings.CharacterCardModel != "" {
+		primaryModel = settings.CharacterCardModel
+	}
+	storyRuntime := service.NewStoryChatRuntime(service.StoryChatRuntimeDeps{
+		ChatStore: chatStore, MessageStore: messageStore, StoryStore: storyStore,
+		PromptBuilder: storyPromptBuilder, PrimaryClient: service.NewOpenAIStoryPrimaryClient(settings),
+		TurnProcessor: storyProcessor, PrimaryModel: primaryModel,
+	})
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {
@@ -82,6 +102,7 @@ func main() {
 		summaryService,
 		storyInitializer,
 	)
+	handlers.SetStoryMessageRuntime(storyRuntime)
 
 	r := api.SetupRouter(handlers)
 

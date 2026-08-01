@@ -27,6 +27,7 @@ type Handlers struct {
 	chatService      *service.ChatService
 	summaryService   *service.SummaryService
 	storyInitializer *service.StoryChatInitializer
+	storyRuntime     service.StoryMessageRuntime
 }
 
 const (
@@ -262,6 +263,10 @@ func NewHandlers(
 		h.storyInitializer = storyInitializers[0]
 	}
 	return h
+}
+
+func (h *Handlers) SetStoryMessageRuntime(runtime service.StoryMessageRuntime) {
+	h.storyRuntime = runtime
 }
 
 // ========== 认证 API ==========
@@ -693,6 +698,59 @@ func (h *Handlers) GetStoryChatStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, status)
+}
+
+// SendStoryMessage POST /api/story/chats/:id/messages (SSE)
+func (h *Handlers) SendStoryMessage(c *gin.Context) {
+	if h.storyRuntime == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "复杂剧情消息运行时尚未配置"})
+		return
+	}
+	var req model.SendMessageRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "不支持流式响应"})
+		return
+	}
+	writeEvent := func(payload any) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", data); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	result, err := h.storyRuntime.SendMessageWithEvents(c.Request.Context(), service.ChatTurnInput{
+		ChatID: c.Param("id"), Content: req.Content, PresetID: req.PresetID, UserID: GetUserID(c),
+	}, func(token string) error {
+		return writeEvent(map[string]string{"token": token})
+	}, func(event service.StoryRuntimeStatusEvent) error {
+		payload := map[string]string{"scheduler_status": event.Status, "record_id": event.RecordID}
+		if event.ErrorMessage != "" {
+			payload["message"] = event.ErrorMessage
+		}
+		return writeEvent(payload)
+	})
+	if err != nil {
+		_ = writeEvent(map[string]string{"error": err.Error()})
+		_ = writeEvent(map[string]bool{"done": true})
+		return
+	}
+	if result.SchedulerError != "" {
+		_ = writeEvent(map[string]string{"scheduler_status": result.SchedulerStatus, "record_id": result.SchedulerRecordID, "message": result.SchedulerError})
+	}
+	_ = writeEvent(map[string]bool{"done": true})
 }
 
 // ListChats GET /api/chats
