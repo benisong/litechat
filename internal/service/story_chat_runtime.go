@@ -15,6 +15,12 @@ type StoryPromptBuilder interface {
 	BuildStoryPrompt(ctx context.Context, chat *model.Chat, history []*model.Message, content string, state *model.ChatStoryState) ([]model.ChatCompletionMessage, SchedulerValidationSpec, error)
 }
 
+type StoryRuntimeStatusEvent struct {
+	Status       string
+	RecordID     string
+	ErrorMessage string
+}
+
 type StoryProcessResult struct {
 	Status       string
 	RecordID     string
@@ -56,6 +62,10 @@ func NewStoryChatRuntime(deps StoryChatRuntimeDeps) *StoryChatRuntime {
 }
 
 func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
+	return r.SendMessageWithEvents(ctx, input, callback, nil)
+}
+
+func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error) {
 	if err := r.validate(); err != nil {
 		return ChatRuntimeResult{}, err
 	}
@@ -90,22 +100,27 @@ func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput,
 	if err := r.messageStore.Create(assistantMessage); err != nil {
 		return ChatRuntimeResult{}, err
 	}
-	record := &model.ChatSchedulerRecord{
-		ChatID: input.ChatID, UserMessageID: userMessage.ID, AssistantMessageID: assistantMessage.ID,
-		TurnSeq: assistantMessage.Seq, SchedulerModel: "",
-	}
+	record := &model.ChatSchedulerRecord{ChatID: input.ChatID, UserMessageID: userMessage.ID, AssistantMessageID: assistantMessage.ID, TurnSeq: assistantMessage.Seq}
 	if err := r.storyStore.CreateRecord(record); err != nil {
 		return ChatRuntimeResult{}, err
 	}
+	if statusCallback != nil {
+		if err := statusCallback(StoryRuntimeStatusEvent{Status: "processing", RecordID: record.ID}); err != nil {
+			return ChatRuntimeResult{}, err
+		}
+	}
 	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, messages, spec)
 	if err != nil {
+		event := StoryRuntimeStatusEvent{Status: "failed", RecordID: record.ID, ErrorMessage: err.Error()}
+		if statusCallback != nil {
+			_ = statusCallback(event)
+		}
 		return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: err.Error()}, nil
 	}
-	return ChatRuntimeResult{
-		AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID,
-		SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID,
-		SchedulerError: processed.ErrorMessage,
-	}, nil
+	if statusCallback != nil {
+		_ = statusCallback(StoryRuntimeStatusEvent{Status: processed.Status, RecordID: processed.RecordID, ErrorMessage: processed.ErrorMessage})
+	}
+	return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID, SchedulerError: processed.ErrorMessage}, nil
 }
 
 func (r *StoryChatRuntime) Regenerate(context.Context, ChatRegenerateInput, StreamCallback) (ChatRuntimeResult, error) {

@@ -27,6 +27,38 @@ func NewManifestCompiler(storyStore *store.SchedulerStore, client CompletionClie
 	return &ManifestCompiler{storyStore: storyStore, client: client}
 }
 
+func (c *ManifestCompiler) Retry(ctx context.Context, manifestID string, input ManifestCompileInput) (*model.StoryManifest, error) {
+	if c == nil || c.storyStore == nil {
+		return nil, fmt.Errorf("manifest compiler is not configured")
+	}
+	if strings.TrimSpace(manifestID) == "" {
+		return nil, fmt.Errorf("manifest id is required")
+	}
+	previous, err := c.storyStore.GetManifest(manifestID)
+	if err != nil {
+		return nil, err
+	}
+	if previous.Status != model.ManifestStatusFailed && previous.Status != model.ManifestStatusStale {
+		return nil, fmt.Errorf("manifest %s is not retryable in status %s", manifestID, previous.Status)
+	}
+	if input.CharacterID == "" {
+		input.CharacterID = previous.CharacterID
+	}
+	if input.CharacterVersion == "" {
+		input.CharacterVersion = previous.CharacterVersion
+	}
+	if input.WorldbookVersionHash == "" {
+		input.WorldbookVersionHash = previous.WorldbookVersionHash
+	}
+	if input.CompilerModel == "" {
+		input.CompilerModel = previous.CompilerModel
+	}
+	if input.PromptVersion == "" {
+		input.PromptVersion = previous.PromptVersion
+	}
+	return c.Compile(ctx, input)
+}
+
 func (c *ManifestCompiler) CompileOrReuse(ctx context.Context, input ManifestCompileInput) (*model.StoryManifest, error) {
 	if c == nil || c.storyStore == nil {
 		return nil, fmt.Errorf("manifest compiler is not configured")

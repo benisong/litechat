@@ -32,10 +32,15 @@ type StoryChatInitializer struct {
 	storyStore     *store.SchedulerStore
 	characterStore *store.CharacterStore
 	compiler       *ManifestCompiler
+	sourceProvider StorySourceProvider
 }
 
-func NewStoryChatInitializer(chatStore *store.ChatStore, storyStore *store.SchedulerStore, characterStore *store.CharacterStore, compiler *ManifestCompiler) *StoryChatInitializer {
-	return &StoryChatInitializer{chatStore: chatStore, storyStore: storyStore, characterStore: characterStore, compiler: compiler}
+func NewStoryChatInitializer(chatStore *store.ChatStore, storyStore *store.SchedulerStore, characterStore *store.CharacterStore, compiler *ManifestCompiler, providers ...StorySourceProvider) *StoryChatInitializer {
+	initializer := &StoryChatInitializer{chatStore: chatStore, storyStore: storyStore, characterStore: characterStore, compiler: compiler}
+	if len(providers) > 0 {
+		initializer.sourceProvider = providers[0]
+	}
+	return initializer
 }
 
 func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatInitializeInput) (*StoryChatInitializeResult, error) {
@@ -57,10 +62,20 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 	if promptVersion == "" {
 		promptVersion = "compiler-v1"
 	}
+	worldbookHash := input.WorldbookVersionHash
+	compileOnlyText := input.CompileOnlyText
+	if i.sourceProvider != nil {
+		source, sourceErr := i.sourceProvider.Load(ctx, input.UserID, input.CharacterID)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+		worldbookHash = source.VersionHash
+		compileOnlyText = source.Text
+	}
 	manifest, err := i.compiler.CompileOrReuse(ctx, ManifestCompileInput{
 		CharacterID: input.CharacterID, CharacterVersion: input.CharacterVersion,
-		WorldbookVersionHash: input.WorldbookVersionHash, CompilerModel: compilerModel,
-		PromptVersion: promptVersion, CompileOnlyText: input.CompileOnlyText,
+		WorldbookVersionHash: worldbookHash, CompilerModel: compilerModel,
+		PromptVersion: promptVersion, CompileOnlyText: compileOnlyText,
 	})
 	if err != nil {
 		return nil, err
@@ -82,6 +97,28 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 		return nil, err
 	}
 	return &StoryChatInitializeResult{Chat: chat, Manifest: manifest, State: state}, nil
+}
+
+func (i *StoryChatInitializer) RetryManifest(ctx context.Context, userID, manifestID string, input ManifestCompileInput) (*model.StoryManifest, error) {
+	if i == nil || i.compiler == nil || i.storyStore == nil || i.characterStore == nil {
+		return nil, fmt.Errorf("story chat initializer is not configured")
+	}
+	manifest, err := i.storyStore.GetManifest(manifestID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := i.characterStore.GetByID(manifest.CharacterID, userID); err != nil {
+		return nil, err
+	}
+	if i.sourceProvider != nil {
+		source, sourceErr := i.sourceProvider.Load(ctx, userID, manifest.CharacterID)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+		input.WorldbookVersionHash = source.VersionHash
+		input.CompileOnlyText = source.Text
+	}
+	return i.compiler.Retry(ctx, manifestID, input)
 }
 
 func initialStateJSON(compiled string) (string, error) {

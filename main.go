@@ -63,7 +63,8 @@ func main() {
 		settings = &model.AppSettings{}
 	}
 	storyCompiler := service.NewManifestCompiler(storyStore, service.NewOpenAICompletionClient(settings))
-	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler)
+	storySourceProvider := service.NewWorldBookStorySourceProvider(worldBookStore)
+	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler, storySourceProvider)
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {

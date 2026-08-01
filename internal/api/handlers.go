@@ -654,6 +654,47 @@ func (h *Handlers) InitializeStoryChat(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
+// RetryStoryManifest POST /api/story/manifests/:id/retry 重试失败的剧情 Manifest 编译。
+func (h *Handlers) RetryStoryManifest(c *gin.Context) {
+	if h.storyInitializer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "复杂剧情运行时尚未配置"})
+		return
+	}
+	var req struct {
+		CharacterVersion string `json:"character_version"`
+		CompilerModel    string `json:"compiler_model"`
+		PromptVersion    string `json:"prompt_version"`
+		CompileOnlyText  string `json:"compile_only_text"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	manifest, err := h.storyInitializer.RetryManifest(c.Request.Context(), GetUserID(c), c.Param("id"), service.ManifestCompileInput{
+		CharacterVersion: req.CharacterVersion, CompilerModel: req.CompilerModel,
+		PromptVersion: req.PromptVersion, CompileOnlyText: req.CompileOnlyText,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, manifest)
+}
+
+// GetStoryChatStatus GET /api/story/chats/:id/status 查询复杂剧情运行状态。
+func (h *Handlers) GetStoryChatStatus(c *gin.Context) {
+	if h.storyInitializer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "复杂剧情运行时尚未配置"})
+		return
+	}
+	status, err := h.storyInitializer.GetStatus(c.Request.Context(), GetUserID(c), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
 // ListChats GET /api/chats
 func (h *Handlers) ListChats(c *gin.Context) {
 	userID := GetUserID(c)

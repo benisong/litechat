@@ -62,12 +62,19 @@ func TestStoryChatRuntimeRunsIndependentTurn(t *testing.T) {
 		PromptBuilder: fakeStoryPromptBuilder{}, PrimaryClient: fakeStoryPrimaryClient{},
 		TurnProcessor: fakeStoryTurnProcessor{}, PrimaryModel: "story-model",
 	})
-	got, err := runtime.SendMessage(context.Background(), ChatTurnInput{ChatID: chat.ID, UserID: user.ID, Content: "开始剧情"}, nil)
+	events := make([]StoryRuntimeStatusEvent, 0, 2)
+	got, err := runtime.SendMessageWithEvents(context.Background(), ChatTurnInput{ChatID: chat.ID, UserID: user.ID, Content: "开始剧情"}, nil, func(event StoryRuntimeStatusEvent) error {
+		events = append(events, event)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 	if got.AssistantContent != "回复" || got.SchedulerStatus != "success" || got.SchedulerRecordID == "" {
 		t.Fatalf("unexpected result: %+v", got)
+	}
+	if len(events) != 2 || events[0].Status != "processing" || events[1].Status != "success" || events[0].RecordID != events[1].RecordID {
+		t.Fatalf("unexpected runtime events: %+v", events)
 	}
 	messages, err := store.NewMessageStore(db).ListByChatID(chat.ID)
 	if err != nil {
