@@ -38,16 +38,17 @@ type CharacterDraft struct {
 
 // Chat 对话会话模型
 type Chat struct {
-	ID          string     `json:"id" db:"id"`
-	UserID      string     `json:"user_id" db:"user_id"`
-	CharacterID string     `json:"character_id" db:"character_id"`
-	Title       string     `json:"title" db:"title"`
-	PresetID    string     `json:"preset_id" db:"preset_id"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
-	Character   *Character `json:"character,omitempty" db:"-"`
-	LastMessage string     `json:"last_message,omitempty" db:"-"`
-	MsgCount    int        `json:"msg_count,omitempty" db:"-"`
+	ID               string     `json:"id" db:"id"`
+	UserID           string     `json:"user_id" db:"user_id"`
+	CharacterID      string     `json:"character_id" db:"character_id"`
+	Title            string     `json:"title" db:"title"`
+	PresetID         string     `json:"preset_id" db:"preset_id"`
+	SchedulerEnabled bool       `json:"scheduler_enabled" db:"scheduler_enabled"`
+	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at" db:"updated_at"`
+	Character        *Character `json:"character,omitempty" db:"-"`
+	LastMessage      string     `json:"last_message,omitempty" db:"-"`
+	MsgCount         int        `json:"msg_count,omitempty" db:"-"`
 	// 状态栏本地渲染配色（来自角色绑定世界书的状态栏条目，供前端渲染用）
 	StatusBarBg string `json:"status_bar_bg,omitempty" db:"-"`
 	StatusBarFg string `json:"status_bar_fg,omitempty" db:"-"`
@@ -100,6 +101,7 @@ type WorldBook struct {
 	CharacterID   string           `json:"character_id" db:"character_id"`
 	Name          string           `json:"name" db:"name"`
 	Description   string           `json:"description" db:"description"`
+	RuntimeMode   string           `json:"runtime_mode" db:"runtime_mode"`
 	CreatedAt     time.Time        `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at" db:"updated_at"`
 	Entries       []WorldBookEntry `json:"entries,omitempty" db:"-"`
@@ -184,6 +186,141 @@ type ChatSummaryChunk struct {
 	MergedIntoID string    `json:"merged_into_id" db:"merged_into_id"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// ChatSummaryJob 摘要后台任务
+type ChatSummaryJob struct {
+	ID            string    `json:"id" db:"id"`
+	ChatID        string    `json:"chat_id" db:"chat_id"`
+	JobType       string    `json:"job_type" db:"job_type"`
+	FromSeq       int       `json:"from_seq" db:"from_seq"`
+	ToSeq         int       `json:"to_seq" db:"to_seq"`
+	BaseCutoffSeq int       `json:"base_cutoff_seq" db:"base_cutoff_seq"`
+	Status        string    `json:"status" db:"status"`
+	AttemptCount  int       `json:"attempt_count" db:"attempt_count"`
+	NextRunAt     time.Time `json:"next_run_at" db:"next_run_at"`
+	LastError     string    `json:"last_error" db:"last_error"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// SchedulerStatus 调度记录状态。
+type SchedulerStatus string
+
+const (
+	SchedulerStatusPending    SchedulerStatus = "pending"
+	SchedulerStatusProcessing SchedulerStatus = "processing"
+	SchedulerStatusSuccess    SchedulerStatus = "success"
+	SchedulerStatusFailed     SchedulerStatus = "failed"
+	SchedulerStatusInvalid    SchedulerStatus = "invalid"
+	SchedulerStatusConflict   SchedulerStatus = "conflict"
+)
+
+// ManifestStatus 剧情 Manifest 编译状态。
+type ManifestStatus string
+
+const (
+	ManifestStatusPending    ManifestStatus = "pending"
+	ManifestStatusProcessing ManifestStatus = "processing"
+	ManifestStatusReady      ManifestStatus = "ready"
+	ManifestStatusFailed     ManifestStatus = "failed"
+	ManifestStatusStale      ManifestStatus = "stale"
+)
+
+// StoryManifest 角色卡剧情世界书的编译结果。
+type StoryManifest struct {
+	ID                   string         `json:"id" db:"id"`
+	CharacterID          string         `json:"character_id" db:"character_id"`
+	CharacterVersion     string         `json:"character_version" db:"character_version"`
+	WorldbookVersionHash string         `json:"worldbook_version_hash" db:"worldbook_version_hash"`
+	ManifestVersion      int            `json:"manifest_version" db:"manifest_version"`
+	Status               ManifestStatus `json:"status" db:"status"`
+	CompiledJSON         string         `json:"compiled_json" db:"compiled_json"`
+	CompilerModel        string         `json:"compiler_model" db:"compiler_model"`
+	PromptVersion        string         `json:"prompt_version" db:"prompt_version"`
+	ErrorMessage         string         `json:"error_message" db:"error_message"`
+	CreatedAt            time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at" db:"updated_at"`
+}
+
+// ChatStoryState 每个复杂剧情聊天独立的运行状态。
+type ChatStoryState struct {
+	ChatID              string    `json:"chat_id" db:"chat_id"`
+	ManifestID          string    `json:"manifest_id" db:"manifest_id"`
+	StateVersion        int       `json:"state_version" db:"state_version"`
+	StateJSON           string    `json:"state_json" db:"state_json"`
+	CurrentScene        string    `json:"current_scene" db:"current_scene"`
+	ActiveEvent         string    `json:"active_event" db:"active_event"`
+	Route               string    `json:"route" db:"route"`
+	SchedulerStatus     string    `json:"scheduler_status" db:"scheduler_status"`
+	LastSuccessRecordID string    `json:"last_success_record_id" db:"last_success_record_id"`
+	FailureCount        int       `json:"failure_count" db:"failure_count"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// SchedulerObservation 调度模型从本轮对话中提取的候选事实。
+type SchedulerObservation struct {
+	Key        string  `json:"key"`
+	Value      any     `json:"value"`
+	Evidence   string  `json:"evidence"`
+	Confidence float64 `json:"confidence"`
+}
+
+// SchedulerEventCandidate 调度模型建议检查的事件。
+type SchedulerEventCandidate struct {
+	EventID  string `json:"event_id"`
+	Reason   string `json:"reason"`
+	Evidence string `json:"evidence"`
+}
+
+// SchedulerOutput 调度模型的结构化候选输出。
+type SchedulerOutput struct {
+	SchemaVersion   int                       `json:"schema_version"`
+	Observations    []SchedulerObservation    `json:"observations"`
+	EventCandidates []SchedulerEventCandidate `json:"event_candidates"`
+	Inferences      []map[string]any          `json:"inferences"`
+	Warnings        []string                  `json:"warnings"`
+}
+
+// ChatStoryEvent 已确认发生的剧情事件，只追加不覆盖。
+type ChatStoryEvent struct {
+	ID                string    `json:"id" db:"id"`
+	ChatID            string    `json:"chat_id" db:"chat_id"`
+	SchedulerRecordID string    `json:"scheduler_record_id" db:"scheduler_record_id"`
+	EventKey          string    `json:"event_key" db:"event_key"`
+	EventType         string    `json:"event_type" db:"event_type"`
+	Summary           string    `json:"summary" db:"summary"`
+	Importance        string    `json:"importance" db:"importance"`
+	Evidence          string    `json:"evidence" db:"evidence"`
+	Status            string    `json:"status" db:"status"`
+	CreatedAt         time.Time `json:"created_at" db:"created_at"`
+}
+
+// ChatSchedulerRecord 一轮剧情调度记录。
+type ChatSchedulerRecord struct {
+	ID                 string          `json:"id" db:"id"`
+	ChatID             string          `json:"chat_id" db:"chat_id"`
+	UserMessageID      string          `json:"user_message_id" db:"user_message_id"`
+	AssistantMessageID string          `json:"assistant_message_id" db:"assistant_message_id"`
+	TurnSeq            int             `json:"turn_seq" db:"turn_seq"`
+	Status             SchedulerStatus `json:"status" db:"status"`
+	AttemptCount       int             `json:"attempt_count" db:"attempt_count"`
+	SchedulerModel     string          `json:"scheduler_model" db:"scheduler_model"`
+	PromptVersion      string          `json:"prompt_version" db:"prompt_version"`
+	InputSnapshot      string          `json:"input_snapshot" db:"input_snapshot"`
+	RawOutput          string          `json:"raw_output" db:"raw_output"`
+	ParsedOutput       string          `json:"parsed_output" db:"parsed_output"`
+	AppliedChanges     string          `json:"applied_changes" db:"applied_changes"`
+	ContextText        string          `json:"context_text" db:"context_text"`
+	StateVersionBefore int             `json:"state_version_before" db:"state_version_before"`
+	StateVersionAfter  int             `json:"state_version_after" db:"state_version_after"`
+	ErrorCode          string          `json:"error_code" db:"error_code"`
+	ErrorMessage       string          `json:"error_message" db:"error_message"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
+	StartedAt          *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt         *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
+	AppliedAt          *time.Time      `json:"applied_at,omitempty" db:"applied_at"`
 }
 
 // SendMessageRequest 发送消息请求

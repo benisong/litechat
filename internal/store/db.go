@@ -97,6 +97,7 @@ func (db *DB) InitSchema() error {
 		character_id TEXT DEFAULT '',
 		name         TEXT NOT NULL,
 		description  TEXT DEFAULT '',
+		runtime_mode TEXT NOT NULL DEFAULT 'static',
 		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -131,6 +132,7 @@ func (db *DB) InitSchema() error {
 		character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
 		title        TEXT NOT NULL,
 		preset_id    TEXT DEFAULT '',
+		scheduler_enabled INTEGER NOT NULL DEFAULT 0,
 		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -182,6 +184,104 @@ func (db *DB) InitSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_summary_chunks_chat_status ON chat_summary_chunks(chat_id, status, level, from_seq);
 
 	-- 配置表
+	CREATE TABLE IF NOT EXISTS chat_summary_jobs (
+		id               TEXT PRIMARY KEY,
+		chat_id          TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		job_type         TEXT NOT NULL,
+		from_seq         INTEGER NOT NULL,
+		to_seq           INTEGER NOT NULL,
+		base_cutoff_seq  INTEGER DEFAULT 0,
+		status           TEXT NOT NULL DEFAULT 'pending',
+		attempt_count    INTEGER DEFAULT 0,
+		next_run_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_error       TEXT DEFAULT '',
+		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_summary_jobs_status_runat ON chat_summary_jobs(status, next_run_at, created_at);
+
+	-- 剧情运行时 Manifest（角色卡/剧情世界书编译结果）
+	CREATE TABLE IF NOT EXISTS story_manifests (
+		id                         TEXT PRIMARY KEY,
+		character_id               TEXT NOT NULL,
+		character_version          TEXT NOT NULL DEFAULT '',
+		worldbook_version_hash     TEXT NOT NULL DEFAULT '',
+		manifest_version           INTEGER NOT NULL DEFAULT 1,
+		status                     TEXT NOT NULL DEFAULT 'pending',
+		compiled_json              TEXT NOT NULL DEFAULT '',
+		compiler_model             TEXT NOT NULL DEFAULT '',
+		prompt_version             TEXT NOT NULL DEFAULT '',
+		error_message              TEXT NOT NULL DEFAULT '',
+		created_at                 DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at                 DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_story_manifests_character_version
+		ON story_manifests(character_id, character_version, worldbook_version_hash, status);
+
+	-- 每个复杂剧情聊天独立的动态状态
+	CREATE TABLE IF NOT EXISTS chat_story_states (
+		chat_id          TEXT PRIMARY KEY,
+		manifest_id      TEXT NOT NULL,
+		state_version    INTEGER NOT NULL DEFAULT 0,
+		state_json       TEXT NOT NULL DEFAULT '{}',
+		current_scene    TEXT NOT NULL DEFAULT '',
+		active_event     TEXT NOT NULL DEFAULT '',
+		route            TEXT NOT NULL DEFAULT '',
+		scheduler_status TEXT NOT NULL DEFAULT 'ready',
+		last_success_record_id TEXT NOT NULL DEFAULT '',
+		failure_count    INTEGER NOT NULL DEFAULT 0,
+		created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	-- 每一轮调度模型处理记录
+	CREATE TABLE IF NOT EXISTS chat_scheduler_records (
+		id                   TEXT PRIMARY KEY,
+		chat_id              TEXT NOT NULL,
+		user_message_id      TEXT NOT NULL,
+		assistant_message_id TEXT NOT NULL,
+		turn_seq             INTEGER NOT NULL,
+		status               TEXT NOT NULL DEFAULT 'pending',
+		attempt_count        INTEGER NOT NULL DEFAULT 0,
+		scheduler_model      TEXT NOT NULL DEFAULT '',
+		prompt_version       TEXT NOT NULL DEFAULT '',
+		input_snapshot       TEXT NOT NULL DEFAULT '',
+		raw_output           TEXT NOT NULL DEFAULT '',
+		parsed_output        TEXT NOT NULL DEFAULT '',
+		applied_changes      TEXT NOT NULL DEFAULT '',
+		context_text         TEXT NOT NULL DEFAULT '',
+		state_version_before INTEGER NOT NULL DEFAULT 0,
+		state_version_after  INTEGER NOT NULL DEFAULT 0,
+		error_code           TEXT NOT NULL DEFAULT '',
+		error_message        TEXT NOT NULL DEFAULT '',
+		created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+		started_at           DATETIME,
+		finished_at          DATETIME,
+		applied_at           DATETIME,
+		UNIQUE(chat_id, assistant_message_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_scheduler_records_chat_status_seq
+		ON chat_scheduler_records(chat_id, status, turn_seq);
+
+	-- 已确认发生的剧情事件，只追加不覆盖
+	CREATE TABLE IF NOT EXISTS chat_story_events (
+		id                   TEXT PRIMARY KEY,
+		chat_id              TEXT NOT NULL,
+		scheduler_record_id  TEXT NOT NULL,
+		event_key            TEXT NOT NULL,
+		event_type           TEXT NOT NULL DEFAULT '',
+		summary              TEXT NOT NULL DEFAULT '',
+		importance           TEXT NOT NULL DEFAULT 'normal',
+		evidence             TEXT NOT NULL DEFAULT '',
+		status               TEXT NOT NULL DEFAULT 'applied',
+		created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(chat_id, event_key)
+	);
+	CREATE INDEX IF NOT EXISTS idx_story_events_chat_created
+		ON chat_story_events(chat_id, created_at);
+
+	-- 配置表（全局配置）
 	CREATE TABLE IF NOT EXISTS configs (
 		key        TEXT PRIMARY KEY,
 		value      TEXT DEFAULT '',
@@ -237,6 +337,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN bg_color TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN font_color TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN character_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE world_books ADD COLUMN runtime_mode TEXT NOT NULL DEFAULT 'static'`)
 	db.Exec(`ALTER TABLE users ADD COLUMN mode TEXT DEFAULT 'self'`)
 	db.Exec(`ALTER TABLE users ADD COLUMN user_name TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE users ADD COLUMN user_detail TEXT DEFAULT ''`)
@@ -260,6 +361,7 @@ func (db *DB) InitSchema() error {
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE chats ADD COLUMN user_id TEXT DEFAULT ''`)
+	db.Exec(`ALTER TABLE chats ADD COLUMN scheduler_enabled INTEGER NOT NULL DEFAULT 0`)
 	db.Exec(`ALTER TABLE presets ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_books ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE world_book_entries ADD COLUMN user_id TEXT DEFAULT ''`)

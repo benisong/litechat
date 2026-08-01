@@ -1,0 +1,136 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"litechat/internal/model"
+	"litechat/internal/store"
+)
+
+type StoryPrimaryClient interface {
+	Stream(ctx context.Context, modelName string, messages []model.ChatCompletionMessage, callback StreamCallback) (string, error)
+}
+
+type StoryPromptBuilder interface {
+	BuildStoryPrompt(ctx context.Context, chat *model.Chat, history []*model.Message, content string, state *model.ChatStoryState) ([]model.ChatCompletionMessage, SchedulerValidationSpec, error)
+}
+
+type StoryProcessResult struct {
+	Status       string
+	RecordID     string
+	ContextText  string
+	ErrorMessage string
+}
+
+type StoryTurnProcessor interface {
+	ProcessStoryTurn(ctx context.Context, record *model.ChatSchedulerRecord, state *model.ChatStoryState, messages []model.ChatCompletionMessage, spec SchedulerValidationSpec) (StoryProcessResult, error)
+}
+
+// StoryChatRuntime 是复杂剧情独立运行时，不修改 LegacyChatRuntime 的业务流程。
+type StoryChatRuntime struct {
+	chatStore     *store.ChatStore
+	messageStore  *store.MessageStore
+	storyStore    *store.SchedulerStore
+	promptBuilder StoryPromptBuilder
+	primaryClient StoryPrimaryClient
+	turnProcessor StoryTurnProcessor
+	primaryModel  string
+}
+
+type StoryChatRuntimeDeps struct {
+	ChatStore     *store.ChatStore
+	MessageStore  *store.MessageStore
+	StoryStore    *store.SchedulerStore
+	PromptBuilder StoryPromptBuilder
+	PrimaryClient StoryPrimaryClient
+	TurnProcessor StoryTurnProcessor
+	PrimaryModel  string
+}
+
+func NewStoryChatRuntime(deps StoryChatRuntimeDeps) *StoryChatRuntime {
+	return &StoryChatRuntime{
+		chatStore: deps.ChatStore, messageStore: deps.MessageStore, storyStore: deps.StoryStore,
+		promptBuilder: deps.PromptBuilder, primaryClient: deps.PrimaryClient,
+		turnProcessor: deps.TurnProcessor, primaryModel: deps.PrimaryModel,
+	}
+}
+
+func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
+	if err := r.validate(); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	chat, err := r.chatStore.GetByID(input.ChatID, input.UserID)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	if !chat.SchedulerEnabled {
+		return ChatRuntimeResult{}, errors.New("chat is not configured for story runtime")
+	}
+	state, err := r.storyStore.GetStoryState(input.ChatID)
+	if err != nil {
+		return ChatRuntimeResult{}, errors.New("story runtime is not initialized")
+	}
+	history, err := r.messageStore.ListByChatID(input.ChatID)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	userMessage := &model.Message{ChatID: input.ChatID, Role: "user", Content: input.Content}
+	if err := r.messageStore.Create(userMessage); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	messages, spec, err := r.promptBuilder.BuildStoryPrompt(ctx, chat, history, input.Content, state)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	assistantContent, err := r.primaryClient.Stream(ctx, r.primaryModel, messages, callback)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	assistantMessage := &model.Message{ChatID: input.ChatID, Role: "assistant", Content: assistantContent}
+	if err := r.messageStore.Create(assistantMessage); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	record := &model.ChatSchedulerRecord{
+		ChatID: input.ChatID, UserMessageID: userMessage.ID, AssistantMessageID: assistantMessage.ID,
+		TurnSeq: assistantMessage.Seq, SchedulerModel: "",
+	}
+	if err := r.storyStore.CreateRecord(record); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, messages, spec)
+	if err != nil {
+		return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: err.Error()}, nil
+	}
+	return ChatRuntimeResult{
+		AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID,
+		SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID,
+		SchedulerError: processed.ErrorMessage,
+	}, nil
+}
+
+func (r *StoryChatRuntime) Regenerate(context.Context, ChatRegenerateInput, StreamCallback) (ChatRuntimeResult, error) {
+	return ChatRuntimeResult{}, errors.New("story runtime regeneration is disabled in V1")
+}
+
+func (r *StoryChatRuntime) Retry(context.Context, ChatTurnInput, StreamCallback) (ChatRuntimeResult, error) {
+	return ChatRuntimeResult{}, errors.New("story runtime retry is not implemented")
+}
+
+func (r *StoryChatRuntime) validate() error {
+	switch {
+	case r == nil:
+		return errors.New("story runtime is nil")
+	case r.chatStore == nil, r.messageStore == nil, r.storyStore == nil:
+		return errors.New("story runtime stores are not configured")
+	case r.promptBuilder == nil:
+		return errors.New("story prompt builder is not configured")
+	case r.primaryClient == nil:
+		return errors.New("story primary client is not configured")
+	case r.turnProcessor == nil:
+		return errors.New("story turn processor is not configured")
+	case r.primaryModel == "":
+		return errors.New("story primary model is not configured")
+	default:
+		return nil
+	}
+}

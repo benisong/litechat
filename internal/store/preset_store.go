@@ -189,11 +189,14 @@ func (s *WorldBookStore) Create(wb *model.WorldBook, userID string) error {
 	wb.UserID = userID
 	wb.CreatedAt = time.Now()
 	wb.UpdatedAt = time.Now()
+	if wb.RuntimeMode == "" {
+		wb.RuntimeMode = "static"
+	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO world_books (id, user_id, character_id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		wb.ID, wb.UserID, wb.CharacterID, wb.Name, wb.Description, wb.CreatedAt, wb.UpdatedAt,
+		INSERT INTO world_books (id, user_id, character_id, name, description, runtime_mode, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		wb.ID, wb.UserID, wb.CharacterID, wb.Name, wb.Description, wb.RuntimeMode, wb.CreatedAt, wb.UpdatedAt,
 	)
 	return err
 }
@@ -201,9 +204,9 @@ func (s *WorldBookStore) Create(wb *model.WorldBook, userID string) error {
 func (s *WorldBookStore) GetByID(id string, userID string) (*model.WorldBook, error) {
 	wb := &model.WorldBook{}
 	err := s.db.QueryRow(`
-		SELECT id, user_id, character_id, name, description, created_at, updated_at
+		SELECT id, user_id, character_id, name, description, runtime_mode, created_at, updated_at
 		FROM world_books WHERE id = ? AND user_id = ?`, id, userID,
-	).Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description, &wb.CreatedAt, &wb.UpdatedAt)
+	).Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description, &wb.RuntimeMode, &wb.CreatedAt, &wb.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +220,7 @@ func (s *WorldBookStore) GetByID(id string, userID string) (*model.WorldBook, er
 
 func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 	rows, err := s.db.Query(`
-		SELECT wb.id, wb.user_id, wb.character_id, wb.name, wb.description, wb.created_at, wb.updated_at,
+		SELECT wb.id, wb.user_id, wb.character_id, wb.name, wb.description, wb.runtime_mode, wb.created_at, wb.updated_at,
 		       COALESCE(ch.name, '') as char_name
 		FROM world_books wb
 		LEFT JOIN characters ch ON ch.id = wb.character_id
@@ -230,7 +233,7 @@ func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 	var list []*model.WorldBook
 	for rows.Next() {
 		wb := &model.WorldBook{}
-		if err := rows.Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description,
+		if err := rows.Scan(&wb.ID, &wb.UserID, &wb.CharacterID, &wb.Name, &wb.Description, &wb.RuntimeMode,
 			&wb.CreatedAt, &wb.UpdatedAt, &wb.CharacterName); err != nil {
 			return nil, err
 		}
@@ -241,9 +244,12 @@ func (s *WorldBookStore) List(userID string) ([]*model.WorldBook, error) {
 
 func (s *WorldBookStore) Update(wb *model.WorldBook, userID string) error {
 	wb.UpdatedAt = time.Now()
+	if wb.RuntimeMode == "" {
+		wb.RuntimeMode = "static"
+	}
 	_, err := s.db.Exec(`
-		UPDATE world_books SET name=?, description=?, character_id=?, updated_at=? WHERE id=? AND user_id=?`,
-		wb.Name, wb.Description, wb.CharacterID, wb.UpdatedAt, wb.ID, userID,
+		UPDATE world_books SET name=?, description=?, character_id=?, runtime_mode=?, updated_at=? WHERE id=? AND user_id=?`,
+		wb.Name, wb.Description, wb.CharacterID, wb.RuntimeMode, wb.UpdatedAt, wb.ID, userID,
 	)
 	return err
 }
