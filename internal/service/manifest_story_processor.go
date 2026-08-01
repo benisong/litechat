@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"litechat/internal/model"
 	"litechat/internal/store"
@@ -148,6 +149,10 @@ func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
 	}
 	contextText := buildStoryContextText(state)
 	if err := p.storyStore.CommitSchedulerTurn(record.ID, state, state.StateVersion, string(json.RawMessage(mustMarshal(output))), string(changes), contextText, events); err != nil {
+		if errors.Is(err, store.ErrStoryStateConflict) {
+			_ = p.storyStore.MarkStoryTurnConflict(record.ChatID, record.ID, err.Error())
+			return StoryProcessResult{Status: string(model.SchedulerStatusConflict), RecordID: record.ID, ErrorMessage: err.Error()}, nil
+		}
 		return p.fail(record.ID, "commit_error", err)
 	}
 	return StoryProcessResult{Status: string(model.SchedulerStatusSuccess), RecordID: record.ID, ContextText: contextText}, nil

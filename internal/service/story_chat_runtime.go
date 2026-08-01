@@ -178,7 +178,7 @@ func (r *StoryChatRuntime) RetryWithEvents(ctx context.Context, input ChatTurnIn
 	if err != nil {
 		return ChatRuntimeResult{}, errors.New("story runtime is not initialized")
 	}
-	record, err := r.storyStore.LatestFailedRecord(input.ChatID)
+	record, err := r.storyStore.LatestRetryableRecord(input.ChatID)
 	if err != nil {
 		return ChatRuntimeResult{}, fmt.Errorf("no failed scheduler record to retry: %w", err)
 	}

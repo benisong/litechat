@@ -45,7 +45,7 @@ func (s *SchedulerStore) CommitSchedulerTurn(
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("story state version conflict for chat %s", state.ChatID)
+		return fmt.Errorf("%w for chat %s", ErrStoryStateConflict, state.ChatID)
 	}
 
 	for _, event := range events {

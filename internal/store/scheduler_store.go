@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"litechat/internal/model"
 	"time"
@@ -9,7 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// SchedulerStore 持久化剧情 Manifest、状态和调度记录。
+var ErrStoryStateConflict = errors.New("story state version conflict")
+
 type SchedulerStore struct {
 	db *DB
 }
@@ -196,7 +198,7 @@ func (s *SchedulerStore) UpdateStoryState(state *model.ChatStoryState, expectedV
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("story state version conflict for chat %s", state.ChatID)
+		return fmt.Errorf("%w for chat %s", ErrStoryStateConflict, state.ChatID)
 	}
 	state.StateVersion = nextVersion
 	state.UpdatedAt = now
@@ -257,6 +259,17 @@ func (s *SchedulerStore) GetRecord(id string) (*model.ChatSchedulerRecord, error
 		FROM chat_scheduler_records WHERE id = ?`, id))
 }
 
+func (s *SchedulerStore) LatestRetryableRecord(chatID string) (*model.ChatSchedulerRecord, error) {
+	return s.scanRecord(s.db.QueryRow(`
+		SELECT id, chat_id, user_message_id, assistant_message_id, turn_seq,
+		       status, attempt_count, scheduler_model, prompt_version,
+		       input_snapshot, raw_output, parsed_output, applied_changes,
+		       context_text, state_version_before, state_version_after,
+		       error_code, error_message, created_at, started_at, finished_at, applied_at
+		FROM chat_scheduler_records
+		WHERE chat_id = ? AND status IN (?, ?)
+		ORDER BY turn_seq DESC, created_at DESC LIMIT 1`, chatID, model.SchedulerStatusFailed, model.SchedulerStatusConflict))
+}
 func (s *SchedulerStore) LatestFailedRecord(chatID string) (*model.ChatSchedulerRecord, error) {
 	return s.scanRecord(s.db.QueryRow(`
 		SELECT id, chat_id, user_message_id, assistant_message_id, turn_seq,

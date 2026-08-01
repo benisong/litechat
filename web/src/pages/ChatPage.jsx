@@ -211,6 +211,9 @@ export default function ChatPage() {
   const storyState = storyStatus?.State || storyStatus?.state
   const schedulerStatus = storyState?.SchedulerStatus || storyState?.scheduler_status
   const failureCount = storyState?.FailureCount ?? storyState?.failure_count ?? 0
+  const latestFailure = storyStatus?.LatestFailure || storyStatus?.latestFailure
+  const failureMessage = latestFailure?.ErrorMessage || latestFailure?.error_message
+  const failureCode = latestFailure?.ErrorCode || latestFailure?.error_code
 
   const handleRetryScheduler = async () => {
     try {
@@ -294,12 +297,17 @@ export default function ChatPage() {
         </button>
       </div>
 
-      {isStoryChat && (schedulerStatus === 'failed' || schedulerStatus === 'paused') && (
+      {isStoryChat && (schedulerStatus === 'failed' || schedulerStatus === 'paused' || schedulerStatus === 'conflict') && (
         <div className="mx-4 mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="font-medium">剧情调度失败</p>
               <p className="mt-0.5 text-xs text-red-300/80">失败次数：{failureCount}，上一份成功状态未被修改。</p>
+              {(failureCode || failureMessage) && (
+                <p className="mt-1 max-w-[36rem] truncate text-xs text-red-300/70" title={failureMessage}>
+                  {failureCode ? `${failureCode}：` : ''}{failureMessage || '调度失败'}
+                </p>
+              )}
             </div>
             <button
               type="button"

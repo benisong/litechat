@@ -14,6 +14,7 @@ type StoryChatStatus struct {
 	Manifest      *model.StoryManifest
 	State         *model.ChatStoryState
 	LatestSuccess *model.ChatSchedulerRecord
+	LatestFailure *model.ChatSchedulerRecord
 	CheckedAt     time.Time
 }
 
@@ -43,5 +44,9 @@ func (i *StoryChatInitializer) GetStatus(ctx context.Context, userID, chatID str
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	return &StoryChatStatus{Chat: chat, Manifest: manifest, State: state, LatestSuccess: latest, CheckedAt: time.Now()}, nil
+	latestFailure, failureErr := i.storyStore.LatestRetryableRecord(chatID)
+	if failureErr != nil && !errors.Is(failureErr, sql.ErrNoRows) {
+		return nil, failureErr
+	}
+	return &StoryChatStatus{Chat: chat, Manifest: manifest, State: state, LatestSuccess: latest, LatestFailure: latestFailure, CheckedAt: time.Now()}, nil
 }
