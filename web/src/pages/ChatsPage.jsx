@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Trash2, Plus, Search } from 'lucide-react'
-import { useAuthStore, useChatStore, useCharacterStore, useUIStore } from '../store'
+import { MessageSquare, Trash2, Plus, Search, Sparkles } from 'lucide-react'
+import { useAuthStore, useChatStore, useCharacterStore, useUIStore, useSettingsStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
@@ -14,6 +14,7 @@ export default function ChatsPage() {
   const { chats, fetchChats, deleteChat } = useChatStore()
   const { characters, fetchCharacters } = useCharacterStore()
   const { showToast } = useUIStore()
+  const { settings, fetchSettings } = useSettingsStore()
   const [search, setSearch] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
@@ -21,6 +22,7 @@ export default function ChatsPage() {
   useEffect(() => {
     fetchChats()
     fetchCharacters()
+    fetchSettings().catch(() => {})
   }, [])
 
   const filtered = chats.filter(c =>
@@ -38,6 +40,25 @@ export default function ChatsPage() {
       showToast('删除失败', 'error')
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const handleNewStoryChat = async (character, e) => {
+    e.stopPropagation()
+    const { createStoryChat } = useChatStore.getState()
+    try {
+      const compilerModel = settings?.default_model || 'gpt-4o-mini'
+      const result = await createStoryChat({
+        character_id: character.id,
+        title: `与${character.name}的复杂剧情`,
+        compiler_model: compilerModel,
+        prompt_version: 'story-manifest-v1',
+        compile_only_text: character.description || '',
+      })
+      setShowNewChat(false)
+      navigate(`/chats/${result.chat?.id || result.id}`)
+    } catch (err) {
+      showToast(err.message || '复杂剧情初始化失败', 'error')
     }
   }
 
@@ -166,12 +187,10 @@ export default function ChatsPage() {
         ) : (
           <div className="space-y-2">
             {characters.map(char => (
-              <button
+              <div
                 key={char.id}
-                onClick={() => handleNewChat(char)}
                 className="w-full flex items-center gap-3 p-3 rounded-xl
-                           hover:bg-surface-hover active:scale-[0.99]
-                           transition-all duration-150 text-left"
+                           hover:bg-surface-hover transition-all duration-150 text-left"
               >
                 <Avatar name={char.name} src={char.avatar_url} size="md" />
                 <div className="flex-1 min-w-0">
@@ -180,7 +199,20 @@ export default function ChatsPage() {
                     {renderRolePlaceholders(char.description, { character: char, user })}
                   </p>
                 </div>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleNewChat(char)}
+                  className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 hover:bg-white/10"
+                >普通
+                </button>
+                <button
+                  type="button"
+                  onClick={e => handleNewStoryChat(char, e)}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-primary-600/80 px-2.5 py-1.5 text-xs text-white hover:bg-primary-500"
+                >
+                  <Sparkles size={13} />剧情
+                </button>
+              </div>
             ))}
           </div>
         )}

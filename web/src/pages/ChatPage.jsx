@@ -32,6 +32,7 @@ export default function ChatPage() {
     streaming,
     fetchMessages,
     sendMessage,
+    sendStoryMessage,
     deleteChat,
     deleteMessageCascade,
     regenerate,
@@ -200,7 +201,11 @@ export default function ChatPage() {
     setShowJumpToBottom(false)
 
     try {
-      await sendMessage(chatId, content)
+      if (chat?.scheduler_enabled || chat?.schedulerEnabled) {
+        await sendStoryMessage(chatId, content)
+      } else {
+        await sendMessage(chatId, content)
+      }
     } catch (err) {
       showToast(err.message || '发送失败', 'error')
       throw err
@@ -296,6 +301,17 @@ export default function ChatPage() {
           <MoreVertical size={20} />
         </button>
       </div>
+
+      {isStoryChat && storyState && schedulerStatus !== 'failed' && schedulerStatus !== 'paused' && schedulerStatus !== 'conflict' && (
+        <div className="mx-4 mt-3 rounded-xl border border-primary-500/20 bg-primary-500/5 px-3 py-2 text-xs text-gray-300">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-medium text-primary-300">剧情状态：{schedulerStatus || 'ready'}</span>
+            {(storyState.CurrentScene || storyState.current_scene) && <span>场景：{storyState.CurrentScene || storyState.current_scene}</span>}
+            {(storyState.Route || storyState.route) && <span>路线：{storyState.Route || storyState.route}</span>}
+            {(storyState.ActiveEvent || storyState.active_event) && <span>事件：{storyState.ActiveEvent || storyState.active_event}</span>}
+          </div>
+        </div>
+      )}
 
       {isStoryChat && (schedulerStatus === 'failed' || schedulerStatus === 'paused' || schedulerStatus === 'conflict') && (
         <div className="mx-4 mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200">

@@ -237,6 +237,17 @@ export const useChatStore = create((set, get) => ({
     set({ chats: data || [] })
   },
 
+  createStoryChat: async (input) => {
+    const data = await apiFetch('/story/chats', { method: 'POST', body: input })
+    set(s => ({ chats: data.chat ? [data.chat, ...s.chats] : s.chats }))
+    return data
+  },
+
+  retryStoryManifest: async (manifestId, input = {}) => {
+    return apiFetch(`/story/manifests/${manifestId}/retry`, { method: 'POST', body: input })
+  },
+
+
   fetchStoryStatus: async (chatId) => {
     const data = await apiFetch(`/story/chats/${chatId}/status`)
     set({ storyStatus: data })
@@ -364,6 +375,60 @@ export const useChatStore = create((set, get) => ({
           ? { loading: false }
           : {}
       ))
+    }
+  },
+
+  sendStoryMessage: async (chatId, content) => {
+    if (sendingChatIds.has(chatId) || get().streaming) throw chatBusyError()
+    sendingChatIds.add(chatId)
+    const userMsg = { id: createTempMessageId('temp-story-user'), chat_id: chatId, role: 'user', content, created_at: new Date().toISOString() }
+    const aiMsg = { id: createTempMessageId('temp-story-ai'), chat_id: chatId, role: 'assistant', content: '', created_at: new Date().toISOString(), isStreaming: true }
+    set(s => ({ activeChatId: chatId, messages: [...(s.activeChatId === chatId ? s.messages : []), userMsg, aiMsg], streaming: true, streamingChatId: chatId, streamKind: 'story-send', streamContent: '', storyStatus: s.storyStatus }))
+    try {
+      const headers = { 'Content-Type': 'application/json' }
+      const token = getToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/story/chats/${chatId}/messages`, { method: 'POST', headers, body: JSON.stringify({ content }) })
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `发送失败（HTTP ${res.status}）`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullContent = ''
+      let done = false
+      while (!done) {
+        const { done: readerDone, value } = await reader.read()
+        if (readerDone) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const data = line.trim().startsWith('data:') ? line.trim().slice(5).trim() : ''
+          if (!data) continue
+          const parsed = JSON.parse(data)
+          if (parsed.error) throw new Error(parsed.error)
+          if (parsed.token) {
+            fullContent += parsed.token
+            set(s => ({ messages: s.messages.map(m => m.id === aiMsg.id ? { ...m, content: fullContent } : m), streamContent: fullContent }))
+          }
+          if (parsed.scheduler_status) {
+            set(s => ({ storyStatus: s.storyStatus ? { ...s.storyStatus, State: { ...(s.storyStatus.State || {}), SchedulerStatus: parsed.scheduler_status } } : s.storyStatus }))
+          }
+          if (parsed.done) { done = true; break }
+        }
+      }
+      const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
+      set(s => ({ messages: s.activeChatId === chatId ? normalizeChatMessages(freshMessages, fullContent) : s.messages }))
+      await get().fetchStoryStatus(chatId).catch(() => {})
+    } catch (err) {
+      set(s => ({ messages: s.activeChatId === chatId ? s.messages.filter(m => m.id !== userMsg.id && m.id !== aiMsg.id) : s.messages }))
+      try { await get().fetchMessages(chatId, { background: true }) } catch {}
+      throw err
+    } finally {
+      sendingChatIds.delete(chatId)
+      set({ streaming: false, streamingChatId: null, streamKind: null, streamContent: '' })
     }
   },
 
