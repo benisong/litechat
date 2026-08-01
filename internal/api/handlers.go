@@ -17,15 +17,16 @@ import (
 
 // Handlers 所有 API 处理器的集合
 type Handlers struct {
-	characterStore *store.CharacterStore
-	chatStore      *store.ChatStore
-	messageStore   *store.MessageStore
-	presetStore    *store.PresetStore
-	worldBookStore *store.WorldBookStore
-	configStore    *store.ConfigStore
-	userStore      *store.UserStore
-	chatService    *service.ChatService
-	summaryService *service.SummaryService
+	characterStore   *store.CharacterStore
+	chatStore        *store.ChatStore
+	messageStore     *store.MessageStore
+	presetStore      *store.PresetStore
+	worldBookStore   *store.WorldBookStore
+	configStore      *store.ConfigStore
+	userStore        *store.UserStore
+	chatService      *service.ChatService
+	summaryService   *service.SummaryService
+	storyInitializer *service.StoryChatInitializer
 }
 
 const (
@@ -244,8 +245,9 @@ func NewHandlers(
 	userStore *store.UserStore,
 	chatService *service.ChatService,
 	summaryService *service.SummaryService,
+	storyInitializers ...*service.StoryChatInitializer,
 ) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		characterStore: characterStore,
 		chatStore:      chatStore,
 		messageStore:   messageStore,
@@ -256,6 +258,10 @@ func NewHandlers(
 		chatService:    chatService,
 		summaryService: summaryService,
 	}
+	if len(storyInitializers) > 0 {
+		h.storyInitializer = storyInitializers[0]
+	}
+	return h
 }
 
 // ========== 认证 API ==========
@@ -613,6 +619,40 @@ func (h *Handlers) DeleteCharacter(c *gin.Context) {
 }
 
 // ========== 对话 API ==========
+
+type initializeStoryChatRequest struct {
+	CharacterID          string `json:"character_id" binding:"required"`
+	CharacterVersion     string `json:"character_version"`
+	WorldbookVersionHash string `json:"worldbook_version_hash"`
+	Title                string `json:"title"`
+	PresetID             string `json:"preset_id"`
+	CompilerModel        string `json:"compiler_model"`
+	PromptVersion        string `json:"prompt_version"`
+	CompileOnlyText      string `json:"compile_only_text"`
+}
+
+// InitializeStoryChat POST /api/story/chats 创建独立复杂剧情会话。
+func (h *Handlers) InitializeStoryChat(c *gin.Context) {
+	if h.storyInitializer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "复杂剧情运行时尚未配置"})
+		return
+	}
+	var req initializeStoryChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result, err := h.storyInitializer.Initialize(c.Request.Context(), service.StoryChatInitializeInput{
+		UserID: GetUserID(c), CharacterID: req.CharacterID, CharacterVersion: req.CharacterVersion,
+		WorldbookVersionHash: req.WorldbookVersionHash, Title: req.Title, PresetID: req.PresetID,
+		CompilerModel: req.CompilerModel, PromptVersion: req.PromptVersion, CompileOnlyText: req.CompileOnlyText,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, result)
+}
 
 // ListChats GET /api/chats
 func (h *Handlers) ListChats(c *gin.Context) {

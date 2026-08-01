@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"litechat/internal/api"
+	"litechat/internal/model"
 	"litechat/internal/service"
 	"litechat/internal/store"
 	"log"
@@ -55,6 +56,14 @@ func main() {
 	configStore := store.NewConfigStore(db)
 	userStore := store.NewUserStore(db)
 	summaryStore := store.NewSummaryStore(summaryDB, db)
+	storyStore := store.NewSchedulerStore(db)
+	settings, settingsErr := configStore.GetSettings()
+	if settingsErr != nil {
+		log.Printf("读取剧情编译模型配置失败: %v", settingsErr)
+		settings = &model.AppSettings{}
+	}
+	storyCompiler := service.NewManifestCompiler(storyStore, service.NewOpenAICompletionClient(settings))
+	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler)
 
 	// 确保初始用户存在
 	if err := userStore.EnsureInitialUsers(); err != nil {
@@ -70,6 +79,7 @@ func main() {
 		userStore,
 		chatService,
 		summaryService,
+		storyInitializer,
 	)
 
 	r := api.SetupRouter(handlers)

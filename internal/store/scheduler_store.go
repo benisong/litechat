@@ -67,6 +67,24 @@ func (s *SchedulerStore) GetManifest(id string) (*model.StoryManifest, error) {
 	return manifest, nil
 }
 
+func (s *SchedulerStore) GetReadyManifest(characterID, characterVersion, worldbookVersionHash string) (*model.StoryManifest, error) {
+	manifest := &model.StoryManifest{}
+	err := s.db.QueryRow(`
+		SELECT id, character_id, character_version, worldbook_version_hash, manifest_version,
+		       status, compiled_json, compiler_model, prompt_version, error_message, created_at, updated_at
+		FROM story_manifests
+		WHERE character_id = ? AND character_version = ? AND worldbook_version_hash = ? AND status = ?
+		ORDER BY updated_at DESC LIMIT 1`,
+		characterID, characterVersion, worldbookVersionHash, model.ManifestStatusReady,
+	).Scan(&manifest.ID, &manifest.CharacterID, &manifest.CharacterVersion, &manifest.WorldbookVersionHash,
+		&manifest.ManifestVersion, &manifest.Status, &manifest.CompiledJSON, &manifest.CompilerModel,
+		&manifest.PromptVersion, &manifest.ErrorMessage, &manifest.CreatedAt, &manifest.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return manifest, nil
+}
+
 func (s *SchedulerStore) MarkManifestReady(id, compiledJSON, promptVersion, compilerModel string) error {
 	result, err := s.db.Exec(`
 		UPDATE story_manifests

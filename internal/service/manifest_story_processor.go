@@ -11,6 +11,7 @@ import (
 type manifestFieldJSON struct {
 	Type     string          `json:"type"`
 	Writable bool            `json:"writable"`
+	Initial  any             `json:"initial"`
 	Min      *float64        `json:"min"`
 	Max      *float64        `json:"max"`
 	Allowed  map[string]bool `json:"allowed"`
@@ -31,6 +32,7 @@ type manifestObservationRule struct {
 }
 
 type manifestRuntimeDocument struct {
+	ManifestVersion  int                          `json:"manifest_version"`
 	Fields           map[string]manifestFieldJSON `json:"fields"`
 	ObservationRules []manifestObservationRule    `json:"observation_rules"`
 }
