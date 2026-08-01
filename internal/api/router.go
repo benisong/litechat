@@ -50,6 +50,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.POST("/story/chats", h.InitializeStoryChat)
 		api.POST("/story/chats/:id/messages", h.SendStoryMessage)
 		api.GET("/story/chats/:id/status", h.GetStoryChatStatus)
+		api.POST("/story/chats/:id/scheduler/retry", h.RetryStoryScheduler)
 		api.POST("/story/manifests/:id/retry", h.RetryStoryManifest)
 		api.GET("/chats/:id", h.GetChat)
 		api.DELETE("/chats/:id", h.DeleteChat)

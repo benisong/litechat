@@ -228,11 +228,59 @@ export const useChatStore = create((set, get) => ({
   streamKind: null,
   streamBaseSeq: 0,
   streamContent: '',
+  storyStatus: null,
+  schedulerRetrying: false,
 
   fetchChats: async (characterId) => {
     const url = characterId ? `/chats?character_id=${characterId}` : '/chats'
     const data = await apiFetch(url)
     set({ chats: data || [] })
+  },
+
+  fetchStoryStatus: async (chatId) => {
+    const data = await apiFetch(`/story/chats/${chatId}/status`)
+    set({ storyStatus: data })
+    return data
+  },
+
+  retryStoryScheduler: async (chatId) => {
+    if (sendingChatIds.has(chatId) || get().schedulerRetrying) throw chatBusyError()
+    sendingChatIds.add(chatId)
+    set({ schedulerRetrying: true })
+    try {
+      const headers = { 'Content-Type': 'application/json' }
+      const token = getToken()
+      if (token) headers.Authorization = `Bearer ${token}`
+      const res = await fetch(`${BASE}/story/chats/${chatId}/scheduler/retry`, { method: 'POST', headers })
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || `调度重试失败（HTTP ${res.status}）`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let done = false
+      while (!done) {
+        const { done: readerDone, value } = await reader.read()
+        if (readerDone) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const data = line.trim().startsWith('data:') ? line.trim().slice(5).trim() : ''
+          if (!data) continue
+          const parsed = JSON.parse(data)
+          if (parsed.error) throw new Error(parsed.error)
+          if (parsed.done) { done = true; break }
+          if (parsed.status) set(s => ({ storyStatus: s.storyStatus ? { ...s.storyStatus, scheduler_status: parsed.status } : s.storyStatus }))
+        }
+      }
+      await get().fetchStoryStatus(chatId)
+      return get().storyStatus
+    } finally {
+      sendingChatIds.delete(chatId)
+      set({ schedulerRetrying: false })
+    }
   },
 
   createChat: async (characterId, title, presetId) => {

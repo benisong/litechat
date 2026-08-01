@@ -35,6 +35,10 @@ export default function ChatPage() {
     deleteChat,
     deleteMessageCascade,
     regenerate,
+    fetchStoryStatus,
+    retryStoryScheduler,
+    storyStatus,
+    schedulerRetrying,
   } = useChatStore()
 
   const [chat, setChat] = useState(null)
@@ -120,6 +124,9 @@ export default function ChatPage() {
 
       const data = await res.json()
       setChat(data)
+      if (data.scheduler_enabled || data.schedulerEnabled) {
+        fetchStoryStatus(chatId).catch(() => {})
+      }
 
       const cachedCharacter = useCharacterStore
         .getState()
@@ -201,6 +208,18 @@ export default function ChatPage() {
   }
 
   const isStoryChat = Boolean(chat?.scheduler_enabled || chat?.schedulerEnabled)
+  const storyState = storyStatus?.State || storyStatus?.state
+  const schedulerStatus = storyState?.SchedulerStatus || storyState?.scheduler_status
+  const failureCount = storyState?.FailureCount ?? storyState?.failure_count ?? 0
+
+  const handleRetryScheduler = async () => {
+    try {
+      await retryStoryScheduler(chatId)
+      showToast('调度重试完成', 'success')
+    } catch (err) {
+      showToast(err.message || '调度重试失败', 'error')
+    }
+  }
 
   const latestUserMessageId = !streaming
     ? [...messages].reverse().find(msg => msg.role === 'user')?.id || null
@@ -274,6 +293,25 @@ export default function ChatPage() {
           <MoreVertical size={20} />
         </button>
       </div>
+
+      {isStoryChat && (schedulerStatus === 'failed' || schedulerStatus === 'paused') && (
+        <div className="mx-4 mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="font-medium">剧情调度失败</p>
+              <p className="mt-0.5 text-xs text-red-300/80">失败次数：{failureCount}，上一份成功状态未被修改。</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRetryScheduler}
+              disabled={schedulerRetrying || streaming}
+              className="rounded-lg border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-100 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {schedulerRetrying ? '重试中…' : '重试调度'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div
         ref={messagesContainerRef}

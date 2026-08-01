@@ -155,8 +155,51 @@ func (r *StoryChatRuntime) Regenerate(context.Context, ChatRegenerateInput, Stre
 	return ChatRuntimeResult{}, errors.New("story runtime regeneration is disabled in V1")
 }
 
-func (r *StoryChatRuntime) Retry(context.Context, ChatTurnInput, StreamCallback) (ChatRuntimeResult, error) {
-	return ChatRuntimeResult{}, errors.New("story runtime retry is not implemented")
+func (r *StoryChatRuntime) Retry(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
+	return r.RetryWithEvents(ctx, input, nil)
+}
+
+func (r *StoryChatRuntime) RetryWithEvents(ctx context.Context, input ChatTurnInput, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error) {
+	if err := r.validate(); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	chat, err := r.chatStore.GetByID(input.ChatID, input.UserID)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	if !chat.SchedulerEnabled {
+		return ChatRuntimeResult{}, errors.New("chat is not configured for story runtime")
+	}
+	if !r.beginTurn(input.ChatID) {
+		return ChatRuntimeResult{}, fmt.Errorf("story chat is busy")
+	}
+	defer r.finishTurn(input.ChatID)
+	state, err := r.storyStore.GetStoryState(input.ChatID)
+	if err != nil {
+		return ChatRuntimeResult{}, errors.New("story runtime is not initialized")
+	}
+	record, err := r.storyStore.LatestFailedRecord(input.ChatID)
+	if err != nil {
+		return ChatRuntimeResult{}, fmt.Errorf("no failed scheduler record to retry: %w", err)
+	}
+	if err := r.storyStore.MarkStoryTurnProcessing(input.ChatID, record.ID); err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	if statusCallback != nil {
+		_ = statusCallback(StoryRuntimeStatusEvent{Status: "processing", RecordID: record.ID})
+	}
+	processed, processErr := r.turnProcessor.ProcessStoryTurn(ctx, record, state, nil, SchedulerValidationSpec{})
+	if processErr != nil {
+		_ = r.storyStore.MarkStoryTurnFailed(input.ChatID, record.ID, "retry_error", processErr.Error())
+		if statusCallback != nil {
+			_ = statusCallback(StoryRuntimeStatusEvent{Status: "failed", RecordID: record.ID, ErrorMessage: processErr.Error()})
+		}
+		return ChatRuntimeResult{SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: processErr.Error()}, nil
+	}
+	if statusCallback != nil {
+		_ = statusCallback(StoryRuntimeStatusEvent{Status: processed.Status, RecordID: processed.RecordID, ErrorMessage: processed.ErrorMessage})
+	}
+	return ChatRuntimeResult{SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID, SchedulerError: processed.ErrorMessage}, nil
 }
 
 func (r *StoryChatRuntime) validate() error {

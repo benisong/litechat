@@ -103,6 +103,7 @@ func main() {
 		storyInitializer,
 	)
 	handlers.SetStoryMessageRuntime(storyRuntime)
+	handlers.SetStorySchedulerRetryRuntime(storyRuntime)
 
 	r := api.SetupRouter(handlers)
 

@@ -28,6 +28,7 @@ type Handlers struct {
 	summaryService   *service.SummaryService
 	storyInitializer *service.StoryChatInitializer
 	storyRuntime     service.StoryMessageRuntime
+	storyRetry       service.StorySchedulerRetryRuntime
 }
 
 const (
@@ -269,7 +270,9 @@ func (h *Handlers) SetStoryMessageRuntime(runtime service.StoryMessageRuntime) {
 	h.storyRuntime = runtime
 }
 
-// ========== 认证 API ==========
+func (h *Handlers) SetStorySchedulerRetryRuntime(runtime service.StorySchedulerRetryRuntime) {
+	h.storyRetry = runtime
+}
 
 // Login POST /api/auth/login 用户登录
 func (h *Handlers) Login(c *gin.Context) {
@@ -753,7 +756,40 @@ func (h *Handlers) SendStoryMessage(c *gin.Context) {
 	_ = writeEvent(map[string]bool{"done": true})
 }
 
-// ListChats GET /api/chats
+// RetryStoryScheduler POST /api/story/chats/:id/scheduler/retry (SSE)
+func (h *Handlers) RetryStoryScheduler(c *gin.Context) {
+	if h.storyRetry == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "复杂剧情重试服务未配置"})
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "不支持流式响应"})
+		return
+	}
+	statusCallback := func(event service.StoryRuntimeStatusEvent) error {
+		payload, _ := json.Marshal(map[string]string{"status": event.Status, "record_id": event.RecordID, "error_message": event.ErrorMessage})
+		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	_, err := h.storyRetry.RetryWithEvents(c.Request.Context(), service.ChatTurnInput{ChatID: c.Param("id"), UserID: GetUserID(c)}, statusCallback)
+	if err != nil {
+		payload, _ := json.Marshal(map[string]string{"error": err.Error()})
+		fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+		flusher.Flush()
+		return
+	}
+	fmt.Fprint(c.Writer, "data: {\"done\":true}\n\n")
+	flusher.Flush()
+}
+
 func (h *Handlers) ListChats(c *gin.Context) {
 	userID := GetUserID(c)
 	characterID := c.Query("character_id")

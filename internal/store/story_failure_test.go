@@ -2,6 +2,30 @@ package store
 
 import "testing"
 
+func TestMarkStoryTurnFailedPausesAfterThreshold(t *testing.T) {
+	db := newSchedulerTestDB(t)
+	defer db.Close()
+	_, err := db.Exec(`
+		INSERT INTO chat_story_states (chat_id, manifest_id, state_json, scheduler_status, failure_count)
+		VALUES ('chat-pause', 'manifest-1', '{}', 'failed', 2);
+		INSERT INTO chat_scheduler_records (id, chat_id, user_message_id, assistant_message_id, turn_seq, status)
+		VALUES ('record-pause', 'chat-pause', 'user-1', 'assistant-1', 1, 'processing');`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := NewSchedulerStore(db).MarkStoryTurnFailed("chat-pause", "record-pause", "invalid_output", "bad output"); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var failures int
+	if err := db.QueryRow("SELECT scheduler_status, failure_count FROM chat_story_states WHERE chat_id = ?", "chat-pause").Scan(&status, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if status != "paused" || failures != 3 {
+		t.Fatalf("unexpected pause state: %s %d", status, failures)
+	}
+}
+
 func TestMarkStoryTurnFailedPreservesStateAndIncrementsFailureCount(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	defer db.Close()

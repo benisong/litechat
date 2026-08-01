@@ -33,6 +33,11 @@ type ChatRuntime interface {
 }
 
 // StoryMessageRuntime 是复杂剧情消息入口的最小接口。
+type StorySchedulerRetryRuntime interface {
+	RetryWithEvents(ctx context.Context, input ChatTurnInput, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error)
+}
+
+// StoryMessageRuntime 是复杂剧情消息入口的最小接口。
 type StoryMessageRuntime interface {
 	SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error)
 }

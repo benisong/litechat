@@ -257,6 +257,18 @@ func (s *SchedulerStore) GetRecord(id string) (*model.ChatSchedulerRecord, error
 		FROM chat_scheduler_records WHERE id = ?`, id))
 }
 
+func (s *SchedulerStore) LatestFailedRecord(chatID string) (*model.ChatSchedulerRecord, error) {
+	return s.scanRecord(s.db.QueryRow(`
+		SELECT id, chat_id, user_message_id, assistant_message_id, turn_seq,
+		       status, attempt_count, scheduler_model, prompt_version,
+		       input_snapshot, raw_output, parsed_output, applied_changes,
+		       context_text, state_version_before, state_version_after,
+		       error_code, error_message, created_at, started_at, finished_at, applied_at
+		FROM chat_scheduler_records
+		WHERE chat_id = ? AND status = ?
+		ORDER BY turn_seq DESC, created_at DESC LIMIT 1`, chatID, model.SchedulerStatusFailed))
+}
+
 func (s *SchedulerStore) LatestSuccessfulRecord(chatID string) (*model.ChatSchedulerRecord, error) {
 	return s.scanRecord(s.db.QueryRow(`
 		SELECT id, chat_id, user_message_id, assistant_message_id, turn_seq,

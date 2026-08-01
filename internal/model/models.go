@@ -212,6 +212,7 @@ const (
 	SchedulerStatusProcessing SchedulerStatus = "processing"
 	SchedulerStatusSuccess    SchedulerStatus = "success"
 	SchedulerStatusFailed     SchedulerStatus = "failed"
+	SchedulerStatusPaused     SchedulerStatus = "paused"
 	SchedulerStatusInvalid    SchedulerStatus = "invalid"
 	SchedulerStatusConflict   SchedulerStatus = "conflict"
 )
