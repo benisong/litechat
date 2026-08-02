@@ -16,6 +16,7 @@ import EmptyState from '../components/ui/EmptyState'
 import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
 import { renderRolePlaceholders } from '../utils/placeholderRender'
+import liyuSystemPreset from '../data/liyu-normal-card-v1.json'
 
 const STEPS = [
   {
@@ -140,8 +141,8 @@ function getChoiceLabels(choices, usePresets) {
 export default function CharactersPage() {
   const navigate = useNavigate()
   const user = useAuthStore(state => state.user)
-  const { characters, fetchCharacters, deleteCharacter, generateCharacterCard } = useCharacterStore()
-  const { createChat } = useChatStore()
+  const { characters, fetchCharacters, deleteCharacter, generateCharacterCard, createCharacter } = useCharacterStore()
+  const { createChat, createStoryChat } = useChatStore()
   const { showToast } = useUIStore()
 
   const [selectedChar, setSelectedChar] = useState(null)
@@ -180,6 +181,42 @@ export default function CharactersPage() {
       })),
     [pendingCustomInputs, pendingPresetUsage]
   )
+
+  const handleStoryChat = async (char, event) => {
+    event.stopPropagation()
+    try {
+      const result = await createStoryChat({
+        character_id: char.id,
+        title: `与${char.name}的复杂剧情`,
+        compiler_model: 'gpt-4o-mini',
+        prompt_version: 'story-manifest-v1',
+        compile_only_text: [char.description, char.personality, char.scenario].filter(Boolean).join('\n\n'),
+      })
+      const chat = result.chat || result.Chat
+      navigate(`/chats/${chat?.id || chat?.ID}`)
+    } catch (err) {
+      showToast(err.message || '复杂剧情初始化失败', 'error')
+    }
+  }
+
+  const handleImportSystemPreset = async () => {
+    try {
+      const character = await createCharacter({
+        name: liyuSystemPreset.name,
+        description: liyuSystemPreset.description,
+        personality: liyuSystemPreset.personality,
+        scenario: liyuSystemPreset.scenario,
+        first_msg: liyuSystemPreset.first_msg,
+        tags: `${liyuSystemPreset.tags},系统预制,复杂剧情`,
+        pov: liyuSystemPreset.pov || 'second',
+      })
+      setShowTemplatePrompt(false)
+      showToast('系统预制角色卡已导入', 'success')
+      navigate(`/characters/${character.id}/edit`)
+    } catch (err) {
+      showToast(err.message || '导入系统预制失败', 'error')
+    }
+  }
 
   const handleChat = async (char, event) => {
     event.stopPropagation()
@@ -343,6 +380,14 @@ export default function CharactersPage() {
                 </div>
 
                 <div className="flex gap-2 mt-auto">
+                  {char.tags?.includes('复杂剧情') && (
+                    <button
+                      onClick={e => handleStoryChat(char, e)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors"
+                    >
+                      <Sparkles size={13} />剧情
+                    </button>
+                  )}
                   <button
                     onClick={e => handleChat(char, e)}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary-600/20 text-primary-400 text-xs font-medium hover:bg-primary-600/30 transition-colors"
@@ -493,6 +538,13 @@ export default function CharactersPage() {
             <button onClick={startTemplateFlow} className="btn-primary w-full py-3 flex items-center justify-center gap-2">
               <Sparkles size={16} />
               使用模板生成
+            </button>
+            <button
+              onClick={handleImportSystemPreset}
+              className="w-full py-3 rounded-xl border border-primary-500/40 bg-primary-500/10 text-primary-200 hover:bg-primary-500/20 transition-colors text-sm flex items-center justify-center gap-2"
+            >
+              <Sparkles size={16} />
+              导入系统预制：李预·复杂剧情
             </button>
             <button
               onClick={() => {
