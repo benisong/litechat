@@ -8,6 +8,7 @@ import (
 	"litechat/internal/model"
 	"litechat/internal/service"
 	"litechat/internal/store"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -656,6 +657,7 @@ func (h *Handlers) InitializeStoryChat(c *gin.Context) {
 		CompilerModel: req.CompilerModel, PromptVersion: req.PromptVersion, CompileOnlyText: req.CompileOnlyText,
 	})
 	if err != nil {
+		log.Printf("story chat initialization failed: user=%s character=%s model=%s prompt=%s err=%v", GetUserID(c), req.CharacterID, req.CompilerModel, req.PromptVersion, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
