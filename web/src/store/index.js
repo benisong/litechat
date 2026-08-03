@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS = {
   character_card_model: '',
   use_default_model_for_memory: true,
   memory_model: '',
+  story_compiler_model: '',
+  story_scheduler_model: '',
   memory_prompt_suffix: '',
   memory_summary_char_limit: 3000,
   theme: 'dark',

@@ -28,11 +28,12 @@ type StoryChatInitializeResult struct {
 }
 
 type StoryChatInitializer struct {
-	chatStore      *store.ChatStore
-	storyStore     *store.SchedulerStore
-	characterStore *store.CharacterStore
-	compiler       *ManifestCompiler
-	sourceProvider StorySourceProvider
+	chatStore            *store.ChatStore
+	storyStore           *store.SchedulerStore
+	characterStore       *store.CharacterStore
+	compiler             *ManifestCompiler
+	sourceProvider       StorySourceProvider
+	defaultCompilerModel string
 }
 
 func NewStoryChatInitializer(chatStore *store.ChatStore, storyStore *store.SchedulerStore, characterStore *store.CharacterStore, compiler *ManifestCompiler, providers ...StorySourceProvider) *StoryChatInitializer {
@@ -43,6 +44,11 @@ func NewStoryChatInitializer(chatStore *store.ChatStore, storyStore *store.Sched
 	return initializer
 }
 
+func (i *StoryChatInitializer) SetDefaultCompilerModel(modelName string) {
+	if i != nil && strings.TrimSpace(modelName) != "" {
+		i.defaultCompilerModel = strings.TrimSpace(modelName)
+	}
+}
 func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatInitializeInput) (*StoryChatInitializeResult, error) {
 	if i == nil || i.chatStore == nil || i.storyStore == nil || i.characterStore == nil || i.compiler == nil {
 		return nil, fmt.Errorf("story chat initializer is not configured")
@@ -55,6 +61,9 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 		return nil, err
 	}
 	compilerModel := input.CompilerModel
+	if compilerModel == "" {
+		compilerModel = i.defaultCompilerModel
+	}
 	if compilerModel == "" {
 		compilerModel = "story-compiler"
 	}
@@ -71,6 +80,11 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 		}
 		worldbookHash = source.VersionHash
 		compileOnlyText = source.Text
+		if strings.TrimSpace(compileOnlyText) == "" {
+			compileOnlyText = strings.Join([]string{character.Description, character.Personality, character.Scenario, character.FirstMsg}, "\n\n")
+		}
+	} else if strings.TrimSpace(compileOnlyText) == "" {
+		compileOnlyText = strings.Join([]string{character.Description, character.Personality, character.Scenario, character.FirstMsg}, "\n\n")
 	}
 	manifest, err := i.compiler.CompileOrReuse(ctx, ManifestCompileInput{
 		CharacterID: input.CharacterID, CharacterVersion: input.CharacterVersion,

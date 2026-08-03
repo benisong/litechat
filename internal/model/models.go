@@ -149,6 +149,8 @@ type AppSettings struct {
 	CharacterCardModel              string `json:"character_card_model"`
 	UseDefaultModelForMemory        bool   `json:"use_default_model_for_memory"`
 	MemoryModel                     string `json:"memory_model"`
+	StoryCompilerModel              string `json:"story_compiler_model"`
+	StorySchedulerModel             string `json:"story_scheduler_model"`
 	MemoryPromptSuffix              string `json:"memory_prompt_suffix"`
 	MemorySummaryCharLimit          int    `json:"memory_summary_char_limit"`
 	Theme                           string `json:"theme"`

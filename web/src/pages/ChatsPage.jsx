@@ -47,7 +47,7 @@ export default function ChatsPage() {
     e.stopPropagation()
     const { createStoryChat } = useChatStore.getState()
     try {
-      const compilerModel = settings?.default_model || 'gpt-4o-mini'
+      const compilerModel = settings?.story_compiler_model || settings?.default_model || 'gpt-4o-mini'
       const result = await createStoryChat({
         character_id: character.id,
         title: `与${character.name}的复杂剧情`,

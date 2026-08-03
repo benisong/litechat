@@ -69,6 +69,8 @@ export default function SettingsPage() {
   const memoryModelValue = form.use_default_model_for_memory !== false
     ? (form.default_model || '')
     : (form.memory_model || form.default_model || '')
+  const storyCompilerModelValue = form.story_compiler_model || form.default_model || ''
+  const storySchedulerModelValue = form.story_scheduler_model || form.default_model || ''
 
   useEffect(() => {
     fetchSettings()
@@ -448,6 +450,37 @@ export default function SettingsPage() {
                           onChange={e => setForm(f => ({ ...f, memory_model: e.target.value }))}
                           placeholder="先获取模型列表，或手动输入记忆存储摘要模型"
                         />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {isAdmin && (
+                  <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                    <div>
+                      <p className="text-sm text-amber-200">复杂剧情模型</p>
+                      <p className="mt-1 text-xs text-gray-500">Manifest 编译模型和每轮调度模型独立于普通聊天配置；留空则跟随默认模型。</p>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs text-gray-400">剧情 Manifest 编译模型</label>
+                      {models.length > 0 ? (
+                        <select className="input-base w-full appearance-none bg-surface text-sm" value={storyCompilerModelValue} onChange={e => setForm(f => ({ ...f, story_compiler_model: e.target.value }))}>
+                          <option value="">跟随默认模型</option>
+                          {models.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      ) : (
+                        <input className="input-base w-full text-sm" value={form.story_compiler_model || ''} onChange={e => setForm(f => ({ ...f, story_compiler_model: e.target.value }))} placeholder="留空跟随默认模型，或手动输入模型名称" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs text-gray-400">剧情调度模型</label>
+                      {models.length > 0 ? (
+                        <select className="input-base w-full appearance-none bg-surface text-sm" value={storySchedulerModelValue} onChange={e => setForm(f => ({ ...f, story_scheduler_model: e.target.value }))}>
+                          <option value="">跟随默认模型</option>
+                          {models.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      ) : (
+                        <input className="input-base w-full text-sm" value={form.story_scheduler_model || ''} onChange={e => setForm(f => ({ ...f, story_scheduler_model: e.target.value }))} placeholder="留空跟随默认模型，或手动输入模型名称" />
                       )}
                     </div>
                   </div>

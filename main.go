@@ -62,15 +62,21 @@ func main() {
 		log.Printf("读取剧情编译模型配置失败: %v", settingsErr)
 		settings = &model.AppSettings{}
 	}
+	storyCompilerModel := settings.StoryCompilerModel
+	if storyCompilerModel == "" {
+		storyCompilerModel = settings.DefaultModel
+	}
+	storySchedulerModel := settings.StorySchedulerModel
+	if storySchedulerModel == "" {
+		storySchedulerModel = settings.DefaultModel
+	}
 	storyCompiler := service.NewManifestCompiler(storyStore, service.NewOpenAICompletionClient(settings))
 	storySourceProvider := service.NewWorldBookStorySourceProvider(worldBookStore)
 	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler, storySourceProvider)
+	storyInitializer.SetDefaultCompilerModel(storyCompilerModel)
 	storyPromptBuilder := service.NewDefaultStoryPromptBuilder(characterStore, worldBookStore, presetStore)
 	storySchedulerClient := service.NewOpenAICompletionClient(settings)
-	schedulerModel := settings.MemoryModel
-	if schedulerModel == "" {
-		schedulerModel = settings.DefaultModel
-	}
+	schedulerModel := storySchedulerModel
 	if schedulerModel == "" {
 		schedulerModel = "story-scheduler"
 	}

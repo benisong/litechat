@@ -188,7 +188,6 @@ export default function CharactersPage() {
       const result = await createStoryChat({
         character_id: char.id,
         title: `与${char.name}的复杂剧情`,
-        compiler_model: 'gpt-4o-mini',
         prompt_version: 'story-manifest-v1',
         compile_only_text: [char.description, char.personality, char.scenario].filter(Boolean).join('\n\n'),
       })
