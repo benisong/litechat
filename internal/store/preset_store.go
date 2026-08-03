@@ -487,6 +487,10 @@ func (s *ConfigStore) GetSettings() (*model.AppSettings, error) {
 			}
 		case "memory_model":
 			settings.MemoryModel = v
+		case "story_compiler_model":
+			settings.StoryCompilerModel = v
+		case "story_scheduler_model":
+			settings.StorySchedulerModel = v
 		case "memory_prompt_suffix":
 			settings.MemoryPromptSuffix = v
 		case "memory_summary_char_limit":

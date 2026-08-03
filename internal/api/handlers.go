@@ -1379,6 +1379,8 @@ func (h *Handlers) UpdateSettings(c *gin.Context) {
 	h.configStore.Set("character_card_model", settings.CharacterCardModel)
 	h.configStore.Set("use_default_model_for_memory", fmt.Sprintf("%t", settings.UseDefaultModelForMemory))
 	h.configStore.Set("memory_model", settings.MemoryModel)
+	h.configStore.Set("story_compiler_model", settings.StoryCompilerModel)
+	h.configStore.Set("story_scheduler_model", settings.StorySchedulerModel)
 	h.configStore.Set("memory_prompt_suffix", settings.MemoryPromptSuffix)
 	h.configStore.Set("memory_summary_char_limit", strconv.Itoa(settings.MemorySummaryCharLimit))
 	if settings.Theme != "" {

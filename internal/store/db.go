@@ -313,6 +313,8 @@ func (db *DB) InitSchema() error {
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('default_model', 'gpt-4o-mini');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('use_default_model_for_memory', 'true');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_model', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('story_compiler_model', '');
+	INSERT OR IGNORE INTO configs (key, value) VALUES ('story_scheduler_model', '');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('memory_summary_char_limit', '3000');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('theme', 'dark');
 	INSERT OR IGNORE INTO configs (key, value) VALUES ('service_mode', 'self');
