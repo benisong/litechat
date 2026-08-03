@@ -157,6 +157,7 @@ export default function CharactersPage() {
   const [pendingPresetUsage, setPendingPresetUsage] = useState({ ...DEFAULT_PRESET_USAGE })
   const [pendingCustomInputs, setPendingCustomInputs] = useState({ ...EMPTY_CUSTOM_INPUTS })
   const [generating, setGenerating] = useState(false)
+  const [initializingStory, setInitializingStory] = useState(false)
 
   useEffect(() => {
     fetchCharacters()
@@ -184,6 +185,8 @@ export default function CharactersPage() {
 
   const handleStoryChat = async (char, event) => {
     event.stopPropagation()
+    if (initializingStory) return
+    setInitializingStory(true)
     try {
       const result = await createStoryChat({
         character_id: char.id,
@@ -195,6 +198,8 @@ export default function CharactersPage() {
       navigate(`/chats/${chat?.id || chat?.ID}`)
     } catch (err) {
       showToast(err.message || '复杂剧情初始化失败', 'error')
+    } finally {
+      setInitializingStory(false)
     }
   }
 
@@ -382,9 +387,11 @@ export default function CharactersPage() {
                   {char.tags?.includes('复杂剧情') && (
                     <button
                       onClick={e => handleStoryChat(char, e)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors"
+                      disabled={initializingStory}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-amber-500/15 text-amber-300 text-xs font-medium hover:bg-amber-500/25 transition-colors disabled:cursor-wait disabled:opacity-60"
                     >
-                      <Sparkles size={13} />剧情
+                      {initializingStory ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                      {initializingStory ? '初始化中…' : '剧情'}
                     </button>
                   )}
                   <button

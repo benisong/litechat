@@ -28,12 +28,13 @@ type StoryChatInitializeResult struct {
 }
 
 type StoryChatInitializer struct {
-	chatStore            *store.ChatStore
-	storyStore           *store.SchedulerStore
-	characterStore       *store.CharacterStore
-	compiler             *ManifestCompiler
-	sourceProvider       StorySourceProvider
-	defaultCompilerModel string
+	chatStore             *store.ChatStore
+	storyStore            *store.SchedulerStore
+	characterStore        *store.CharacterStore
+	compiler              *ManifestCompiler
+	sourceProvider        StorySourceProvider
+	defaultCompilerModel  string
+	compilerModelProvider func() string
 }
 
 func NewStoryChatInitializer(chatStore *store.ChatStore, storyStore *store.SchedulerStore, characterStore *store.CharacterStore, compiler *ManifestCompiler, providers ...StorySourceProvider) *StoryChatInitializer {
@@ -49,6 +50,11 @@ func (i *StoryChatInitializer) SetDefaultCompilerModel(modelName string) {
 		i.defaultCompilerModel = strings.TrimSpace(modelName)
 	}
 }
+func (i *StoryChatInitializer) SetCompilerModelProvider(provider func() string) {
+	if i != nil {
+		i.compilerModelProvider = provider
+	}
+}
 func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatInitializeInput) (*StoryChatInitializeResult, error) {
 	if i == nil || i.chatStore == nil || i.storyStore == nil || i.characterStore == nil || i.compiler == nil {
 		return nil, fmt.Errorf("story chat initializer is not configured")
@@ -61,6 +67,9 @@ func (i *StoryChatInitializer) Initialize(ctx context.Context, input StoryChatIn
 		return nil, err
 	}
 	compilerModel := input.CompilerModel
+	if compilerModel == "" && i.compilerModelProvider != nil {
+		compilerModel = i.compilerModelProvider()
+	}
 	if compilerModel == "" {
 		compilerModel = i.defaultCompilerModel
 	}

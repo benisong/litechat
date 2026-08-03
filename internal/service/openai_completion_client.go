@@ -15,8 +15,9 @@ import (
 // OpenAICompletionClient 调用 OpenAI Chat Completions 兼容接口。
 // 它只服务调度/初始化等非流式请求，不改变旧聊天的流式客户端。
 type OpenAICompletionClient struct {
-	settings   *model.AppSettings
-	httpClient *http.Client
+	settings         *model.AppSettings
+	httpClient       *http.Client
+	settingsProvider func() *model.AppSettings
 }
 
 func NewOpenAICompletionClient(settings *model.AppSettings) *OpenAICompletionClient {
@@ -26,11 +27,25 @@ func NewOpenAICompletionClient(settings *model.AppSettings) *OpenAICompletionCli
 	}
 }
 
+func (c *OpenAICompletionClient) SetSettingsProvider(provider func() *model.AppSettings) {
+	if c != nil {
+		c.settingsProvider = provider
+	}
+}
 func (c *OpenAICompletionClient) Complete(ctx context.Context, modelName string, messages []model.ChatCompletionMessage) (string, error) {
-	if c == nil || c.settings == nil {
+	if c == nil {
 		return "", fmt.Errorf("completion client is not configured")
 	}
-	if strings.TrimSpace(c.settings.APIEndpoint) == "" {
+	settings := c.settings
+	if c.settingsProvider != nil {
+		if current := c.settingsProvider(); current != nil {
+			settings = current
+		}
+	}
+	if c == nil || settings == nil {
+		return "", fmt.Errorf("completion client is not configured")
+	}
+	if strings.TrimSpace(settings.APIEndpoint) == "" {
 		return "", fmt.Errorf("API endpoint is empty")
 	}
 	if strings.TrimSpace(modelName) == "" {
@@ -56,8 +71,8 @@ func (c *OpenAICompletionClient) Complete(ctx context.Context, modelName string,
 		return "", fmt.Errorf("create completion request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(c.settings.APIKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+c.settings.APIKey)
+	if strings.TrimSpace(settings.APIKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+settings.APIKey)
 	}
 
 	client := c.httpClient

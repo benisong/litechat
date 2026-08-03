@@ -40,12 +40,13 @@ type manifestRuntimeDocument struct {
 
 // ManifestStoryTurnProcessor 将已校验的候选事实按 Manifest 规则转换为状态和事件。
 type ManifestStoryTurnProcessor struct {
-	storyStore    *store.SchedulerStore
-	scheduler     *SchedulerService
-	modelName     string
-	promptVersion string
-	messageStore  *store.MessageStore
-	promptBuilder *SchedulerPromptBuilder
+	storyStore        *store.SchedulerStore
+	scheduler         *SchedulerService
+	modelName         string
+	modelNameProvider func() string
+	promptVersion     string
+	messageStore      *store.MessageStore
+	promptBuilder     *SchedulerPromptBuilder
 }
 
 func NewManifestStoryTurnProcessor(storyStore *store.SchedulerStore, scheduler *SchedulerService, modelName, promptVersion string) *ManifestStoryTurnProcessor {
@@ -57,6 +58,12 @@ func NewManifestStoryTurnProcessorWithMessages(storyStore *store.SchedulerStore,
 	processor.messageStore = messageStore
 	processor.promptBuilder = promptBuilder
 	return processor
+}
+
+func (p *ManifestStoryTurnProcessor) SetModelNameProvider(provider func() string) {
+	if p != nil {
+		p.modelNameProvider = provider
+	}
 }
 
 func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
@@ -109,7 +116,13 @@ func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
 			return p.fail(record.ID, "scheduler_prompt_error", err)
 		}
 	}
-	output, err := p.scheduler.Process(ctx, record, p.modelName, p.promptVersion, schedulerMessages, spec)
+	modelName := p.modelName
+	if p.modelNameProvider != nil {
+		if current := p.modelNameProvider(); current != "" {
+			modelName = current
+		}
+	}
+	output, err := p.scheduler.Process(ctx, record, modelName, p.promptVersion, schedulerMessages, spec)
 	if err != nil {
 		return StoryProcessResult{Status: string(model.SchedulerStatusFailed), RecordID: record.ID, ErrorMessage: err.Error()}, err
 	}

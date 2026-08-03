@@ -70,18 +70,40 @@ func main() {
 	if storySchedulerModel == "" {
 		storySchedulerModel = settings.DefaultModel
 	}
-	storyCompiler := service.NewManifestCompiler(storyStore, service.NewOpenAICompletionClient(settings))
+	completionClient := service.NewOpenAICompletionClient(settings)
+	completionClient.SetSettingsProvider(func() *model.AppSettings {
+		current, err := configStore.GetSettings()
+		if err != nil {
+			return settings
+		}
+		return current
+	})
+	storyCompiler := service.NewManifestCompiler(storyStore, completionClient)
 	storySourceProvider := service.NewWorldBookStorySourceProvider(worldBookStore)
 	storyInitializer := service.NewStoryChatInitializer(chatStore, storyStore, characterStore, storyCompiler, storySourceProvider)
 	storyInitializer.SetDefaultCompilerModel(storyCompilerModel)
+	storyInitializer.SetCompilerModelProvider(func() string {
+		current, err := configStore.GetSettings()
+		if err != nil {
+			return storyCompilerModel
+		}
+		return current.StoryCompilerModel
+	})
 	storyPromptBuilder := service.NewDefaultStoryPromptBuilder(characterStore, worldBookStore, presetStore)
-	storySchedulerClient := service.NewOpenAICompletionClient(settings)
+	storySchedulerClient := completionClient
 	schedulerModel := storySchedulerModel
 	if schedulerModel == "" {
 		schedulerModel = "story-scheduler"
 	}
 	storyScheduler := service.NewSchedulerService(storyStore, storySchedulerClient)
 	storyProcessor := service.NewManifestStoryTurnProcessorWithMessages(storyStore, messageStore, storyScheduler, schedulerModel, "scheduler-v1", service.NewSchedulerPromptBuilder())
+	storyProcessor.SetModelNameProvider(func() string {
+		current, err := configStore.GetSettings()
+		if err != nil || current.StorySchedulerModel == "" {
+			return schedulerModel
+		}
+		return current.StorySchedulerModel
+	})
 	primaryModel := settings.DefaultModel
 	if !settings.UseDefaultModelForCharacterCard && settings.CharacterCardModel != "" {
 		primaryModel = settings.CharacterCardModel
