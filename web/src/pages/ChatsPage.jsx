@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MessageSquare, Trash2, Plus, Search, Sparkles } from 'lucide-react'
+import { MessageSquare, Trash2, Plus, Search, Sparkles, Loader2 } from 'lucide-react'
 import { useAuthStore, useChatStore, useCharacterStore, useUIStore, useSettingsStore } from '../store'
 import Avatar from '../components/ui/Avatar'
 import EmptyState from '../components/ui/EmptyState'
@@ -18,6 +18,8 @@ export default function ChatsPage() {
   const [search, setSearch] = useState('')
   const [showNewChat, setShowNewChat] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [pendingStoryCharacter, setPendingStoryCharacter] = useState(null)
+  const [initializingStory, setInitializingStory] = useState(false)
 
   useEffect(() => {
     fetchChats()
@@ -43,8 +45,9 @@ export default function ChatsPage() {
     }
   }
 
-  const handleNewStoryChat = async (character, e) => {
-    e.stopPropagation()
+  const handleNewStoryChat = async (character) => {
+    if (initializingStory) return
+    setInitializingStory(true)
     const { createStoryChat } = useChatStore.getState()
     try {
       const compilerModel = settings?.story_compiler_model || settings?.default_model || 'gpt-4o-mini'
@@ -60,6 +63,8 @@ export default function ChatsPage() {
       navigate(`/chats/${chat?.id || chat?.ID || result.id || result.ID}`)
     } catch (err) {
       showToast(err.message || '复杂剧情初始化失败', 'error')
+    } finally {
+      setInitializingStory(false)
     }
   }
 
@@ -72,6 +77,14 @@ export default function ChatsPage() {
     } catch {
       showToast('创建对话失败', 'error')
     }
+  }
+
+  const handleSelectCharacter = character => {
+    if (character.tags?.includes('复杂剧情')) {
+      setPendingStoryCharacter(character)
+      return
+    }
+    handleNewChat(character)
   }
 
   return (
@@ -190,31 +203,79 @@ export default function ChatsPage() {
             {characters.map(char => (
               <div
                 key={char.id}
+                onClick={() => handleSelectCharacter(char)}
                 className="w-full flex items-center gap-3 p-3 rounded-xl
-                           hover:bg-surface-hover transition-all duration-150 text-left"
+                           hover:bg-surface-hover transition-all duration-150 text-left cursor-pointer"
               >
                 <Avatar name={char.name} src={char.avatar_url} size="md" />
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">{char.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-sm">{char.name}</p>
+                    {char.tags?.includes('复杂剧情') && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-300">
+                        <Sparkles size={10} />复杂剧情
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500 truncate">
                     {renderRolePlaceholders(char.description, { character: char, user })}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleNewChat(char)}
-                  className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 hover:bg-white/10"
-                >普通
-                </button>
-                <button
-                  type="button"
-                  onClick={e => handleNewStoryChat(char, e)}
-                  className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-primary-600/80 px-2.5 py-1.5 text-xs text-white hover:bg-primary-500"
-                >
-                  <Sparkles size={13} />剧情
-                </button>
+                <span className="shrink-0 text-xs text-gray-500">开始</span>
               </div>
             ))}
+          </div>
+        )}
+      </Modal>
+      <Modal
+        open={!!pendingStoryCharacter || initializingStory}
+        onClose={() => {
+          if (!initializingStory) setPendingStoryCharacter(null)
+        }}
+        title={initializingStory ? '初始化复杂剧情' : '进入动态模式？'}
+      >
+        {initializingStory ? (
+          <div className="py-8 text-center space-y-4">
+            <Loader2 size={38} className="mx-auto animate-spin text-primary-400" />
+            <div>
+              <p className="text-base font-medium text-gray-100">正在初始化剧情世界</p>
+              <p className="mt-2 text-sm text-gray-500">正在调用初始化模型编译角色卡，请不要关闭页面…</p>
+            </div>
+          </div>
+        ) : pendingStoryCharacter && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-3">
+              <Avatar name={pendingStoryCharacter.name} src={pendingStoryCharacter.avatar_url} size="lg" />
+              <div>
+                <p className="font-medium text-gray-100">{pendingStoryCharacter.name}</p>
+                <p className="mt-1 text-xs text-amber-300">这是复杂剧情角色卡</p>
+              </div>
+            </div>
+            <p className="text-sm leading-6 text-gray-300">
+              是否进入动态模式？动态模式会调用初始化模型解析角色卡，并启用剧情状态、事件和调度模型。
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const character = pendingStoryCharacter
+                  setPendingStoryCharacter(null)
+                  handleNewChat(character)
+                }}
+                className="flex-1 rounded-xl border border-surface-border py-2.5 text-sm text-gray-300 hover:bg-surface-hover"
+              >
+                否，普通聊天
+              </button>
+              <button
+                onClick={() => {
+                  const character = pendingStoryCharacter
+                  setPendingStoryCharacter(null)
+                  handleNewStoryChat(character)
+                }}
+                className="flex-1 rounded-xl bg-primary-600 py-2.5 text-sm text-white hover:bg-primary-500"
+              >
+                是，进入动态模式
+              </button>
+            </div>
           </div>
         )}
       </Modal>
