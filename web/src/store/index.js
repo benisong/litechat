@@ -382,7 +382,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   sendStoryMessage: async (chatId, content) => {
-    if (sendingChatIds.has(chatId) || get().streaming) throw chatBusyError()
+    if (sendingChatIds.has(chatId) || get().streamingChatId === chatId) throw chatBusyError()
     sendingChatIds.add(chatId)
     const userMsg = { id: createTempMessageId('temp-story-user'), chat_id: chatId, role: 'user', content, created_at: new Date().toISOString() }
     const aiMsg = { id: createTempMessageId('temp-story-ai'), chat_id: chatId, role: 'assistant', content: '', created_at: new Date().toISOString(), isStreaming: true }
@@ -437,7 +437,7 @@ export const useChatStore = create((set, get) => ({
 
   // 发送消息（SSE 流式）
   sendMessage: async (chatId, content, presetId) => {
-    if (sendingChatIds.has(chatId) || get().streaming) {
+    if (sendingChatIds.has(chatId) || get().streamingChatId === chatId) {
       throw chatBusyError()
     }
     sendingChatIds.add(chatId)
@@ -606,7 +606,7 @@ export const useChatStore = create((set, get) => ({
 
   // 重新生成：后端删除最后一条 AI 回复并重新请求（不重复发送用户消息）
   regenerate: async (chatId) => {
-    if (sendingChatIds.has(chatId) || get().streaming) {
+    if (sendingChatIds.has(chatId) || get().streamingChatId === chatId) {
       throw chatBusyError()
     }
     sendingChatIds.add(chatId)
