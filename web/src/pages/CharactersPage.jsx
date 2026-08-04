@@ -561,7 +561,7 @@ export default function CharactersPage() {
               className="w-full py-3 rounded-xl border border-primary-500/40 bg-primary-500/10 text-primary-200 hover:bg-primary-500/20 transition-colors text-sm flex items-center justify-center gap-2"
             >
               <Sparkles size={16} />
-              导入系统预制：林浩·复杂剧情
+              导入系统预制：重生之玄幻之旅
             </button>
             <button
               onClick={() => {
