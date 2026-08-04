@@ -145,6 +145,13 @@ func validateManifestJSON(raw string) error {
 			return fmt.Errorf("field %s has invalid type %q", key, field.Type)
 		}
 	}
+	for index := range document.ObservationRules {
+		rule := &document.ObservationRules[index]
+		rule.ObservationKey = resolveManifestFieldName(rule.ObservationKey, document.Fields)
+		for effectIndex := range rule.Effects {
+			rule.Effects[effectIndex].Field = resolveManifestFieldName(rule.Effects[effectIndex].Field, document.Fields)
+		}
+	}
 	seenEvents := map[string]bool{}
 	for index, rule := range document.ObservationRules {
 		if strings.TrimSpace(rule.ObservationKey) == "" {
@@ -176,6 +183,56 @@ func validateManifestJSON(raw string) error {
 		}
 	}
 	return nil
+}
+
+func resolveManifestFieldName(name string, fields map[string]manifestFieldJSON) string {
+	if _, ok := fields[name]; ok {
+		return name
+	}
+	best := ""
+	for candidate := range fields {
+		if levenshteinDistance(name, candidate) <= 1 {
+			if best != "" {
+				return name
+			}
+			best = candidate
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return name
+}
+
+func levenshteinDistance(a, b string) int {
+	runesA, runesB := []rune(a), []rune(b)
+	prev := make([]int, len(runesB)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i, ca := range runesA {
+		cur := make([]int, len(runesB)+1)
+		cur[0] = i + 1
+		for j, cb := range runesB {
+			cost := 0
+			if ca != cb {
+				cost = 1
+			}
+			cur[j+1] = minInt(cur[j]+1, prev[j+1]+1, prev[j]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(runesB)]
+}
+
+func minInt(values ...int) int {
+	result := values[0]
+	for _, value := range values[1:] {
+		if value < result {
+			result = value
+		}
+	}
+	return result
 }
 
 func validManifestFieldType(fieldType string) bool {

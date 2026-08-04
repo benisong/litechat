@@ -20,6 +20,29 @@ type manifestFieldJSON struct {
 	Allowed  map[string]bool `json:"allowed"`
 }
 
+func (f *manifestFieldJSON) UnmarshalJSON(data []byte) error {
+	type alias manifestFieldJSON
+	var decoded struct {
+		*alias
+		Values  []string `json:"values"`
+		Default any      `json:"default"`
+	}
+	decoded.alias = (*alias)(f)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if f.Allowed == nil && len(decoded.Values) > 0 {
+		f.Allowed = make(map[string]bool, len(decoded.Values))
+		for _, value := range decoded.Values {
+			f.Allowed[value] = true
+		}
+	}
+	if f.Initial == nil && decoded.Default != nil {
+		f.Initial = decoded.Default
+	}
+	return nil
+}
+
 type manifestEventJSON struct {
 	EventKey   string `json:"event_key"`
 	EventType  string `json:"event_type"`
@@ -32,6 +55,43 @@ type manifestObservationRule struct {
 	Value          any                 `json:"value"`
 	Effects        []StateEffect       `json:"effects"`
 	Events         []manifestEventJSON `json:"events"`
+}
+
+func (r *manifestObservationRule) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ObservationKey string          `json:"observation_key"`
+		Value          any             `json:"value"`
+		Effects        json.RawMessage `json:"effects"`
+		Events         json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.ObservationKey, r.Value = raw.ObservationKey, raw.Value
+	if len(raw.Effects) > 0 && string(raw.Effects) != "null" {
+		if err := json.Unmarshal(raw.Effects, &r.Effects); err != nil {
+			var values map[string]any
+			if err := json.Unmarshal(raw.Effects, &values); err != nil {
+				return err
+			}
+			for field, value := range values {
+				r.Effects = append(r.Effects, StateEffect{Field: field, Operation: "set", Value: value})
+			}
+		}
+	}
+	if len(raw.Events) > 0 && string(raw.Events) != "null" {
+		if err := json.Unmarshal(raw.Events, &r.Events); err != nil {
+			r.Events = nil
+			var names []string
+			if err := json.Unmarshal(raw.Events, &names); err != nil {
+				return err
+			}
+			for _, name := range names {
+				r.Events = append(r.Events, manifestEventJSON{EventKey: name})
+			}
+		}
+	}
+	return nil
 }
 
 type manifestVersionJSON int
