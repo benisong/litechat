@@ -259,6 +259,17 @@ func (s *SchedulerStore) CreateRecord(record *model.ChatSchedulerRecord) error {
 	return err
 }
 
+func (s *SchedulerStore) DeleteRecord(id string) error {
+	if id == "" {
+		return nil
+	}
+	if _, err := s.db.Exec(`DELETE FROM chat_story_events WHERE scheduler_record_id = ?`, id); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM chat_scheduler_records WHERE id = ?`, id)
+	return err
+}
+
 func (s *SchedulerStore) GetRecord(id string) (*model.ChatSchedulerRecord, error) {
 	return s.scanRecord(s.db.QueryRow(`
 		SELECT id, chat_id, user_message_id, assistant_message_id, turn_seq,

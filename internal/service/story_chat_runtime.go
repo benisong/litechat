@@ -84,6 +84,19 @@ func (r *StoryChatRuntime) finishTurn(chatID string) {
 	r.turnMu.Unlock()
 }
 
+func (r *StoryChatRuntime) rollbackTurn(record *model.ChatSchedulerRecord, userMessageID, assistantMessageID string) {
+	if r == nil {
+		return
+	}
+	if r.storyStore != nil && record != nil {
+		_ = r.storyStore.DeleteRecord(record.ID)
+	}
+	if r.messageStore != nil {
+		_ = r.messageStore.DeleteByID(assistantMessageID)
+		_ = r.messageStore.DeleteByID(userMessageID)
+	}
+}
+
 func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
 	return r.SendMessageWithEvents(ctx, input, callback, nil)
 }
@@ -130,7 +143,7 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	}
 	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, nil, SchedulerValidationSpec{})
 	if err != nil {
-		_ = r.storyStore.MarkStoryTurnFailed(record.ChatID, record.ID, "processor_error", err.Error())
+		r.rollbackTurn(record, userMessage.ID, assistantMessage.ID)
 		event := StoryRuntimeStatusEvent{Status: "failed", RecordID: record.ID, ErrorMessage: err.Error()}
 		if statusCallback != nil {
 			_ = statusCallback(event)
@@ -146,9 +159,11 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	}
 	assistantContent, err := r.primaryClient.Stream(ctx, r.primaryModel, messages, callback)
 	if err != nil {
+		r.rollbackTurn(record, userMessage.ID, assistantMessage.ID)
 		return ChatRuntimeResult{}, err
 	}
 	if err := r.messageStore.UpdateContent(assistantMessage.ID, assistantContent, 0); err != nil {
+		r.rollbackTurn(record, userMessage.ID, assistantMessage.ID)
 		return ChatRuntimeResult{}, err
 	}
 	return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID, SchedulerError: processed.ErrorMessage}, nil
