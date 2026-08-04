@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Character 角色卡模型
 type Character struct {
@@ -268,6 +271,24 @@ type SchedulerObservation struct {
 	Value      any     `json:"value"`
 	Evidence   string  `json:"evidence"`
 	Confidence float64 `json:"confidence"`
+}
+
+func (o *SchedulerObservation) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Key            string  `json:"key"`
+		ObservationKey string  `json:"observation_key"`
+		Value          any     `json:"value"`
+		Evidence       string  `json:"evidence"`
+		Confidence     float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	o.Key, o.Value, o.Evidence, o.Confidence = raw.Key, raw.Value, raw.Evidence, raw.Confidence
+	if o.Key == "" {
+		o.Key = raw.ObservationKey
+	}
+	return nil
 }
 
 // SchedulerEventCandidate 调度模型建议检查的事件。
