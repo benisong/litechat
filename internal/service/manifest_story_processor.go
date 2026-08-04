@@ -12,12 +12,13 @@ import (
 )
 
 type manifestFieldJSON struct {
-	Type     string          `json:"type"`
-	Writable bool            `json:"writable"`
-	Initial  any             `json:"initial"`
-	Min      *float64        `json:"min"`
-	Max      *float64        `json:"max"`
-	Allowed  map[string]bool `json:"allowed"`
+	Type        string          `json:"type"`
+	Writable    bool            `json:"writable"`
+	Initial     any             `json:"initial"`
+	Min         *float64        `json:"min"`
+	Max         *float64        `json:"max"`
+	Allowed     map[string]bool `json:"allowed"`
+	Description string          `json:"description"`
 }
 
 func (f *manifestFieldJSON) UnmarshalJSON(data []byte) error {

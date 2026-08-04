@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+type schedulerFieldPrompt struct {
+	Key         string   `json:"key"`
+	Type        string   `json:"type"`
+	Values      []string `json:"values,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
 type schedulerRulePrompt struct {
 	ObservationKey string   `json:"observation_key"`
 	Value          any      `json:"value"`
@@ -26,10 +33,12 @@ func (b *SchedulerPromptBuilder) Build(userContent, assistantContent string, sta
 		return nil, fmt.Errorf("decode scheduler manifest: %w", err)
 	}
 	rules := make([]schedulerRulePrompt, 0, len(document.ObservationRules))
+	fieldKeys := map[string]bool{}
 	for _, rule := range document.ObservationRules {
 		if len(spec.AllowedObservationKeys) != 0 && !spec.AllowedObservationKeys[rule.ObservationKey] {
 			continue
 		}
+		fieldKeys[rule.ObservationKey] = true
 		events := make([]string, 0, len(rule.Events))
 		for _, event := range rule.Events {
 			if event.EventKey != "" {
@@ -38,7 +47,21 @@ func (b *SchedulerPromptBuilder) Build(userContent, assistantContent string, sta
 		}
 		rules = append(rules, schedulerRulePrompt{ObservationKey: rule.ObservationKey, Value: rule.Value, Events: events})
 	}
-	rulesJSON, err := json.Marshal(rules)
+	fields := make([]schedulerFieldPrompt, 0, len(fieldKeys))
+	for key := range fieldKeys {
+		if field, ok := document.Fields[key]; ok {
+			values := make([]string, 0, len(field.Allowed))
+			for value := range field.Allowed {
+				values = append(values, value)
+			}
+			fields = append(fields, schedulerFieldPrompt{Key: key, Type: field.Type, Values: values, Description: field.Description})
+		}
+	}
+	promptManifest := struct {
+		Fields []schedulerFieldPrompt `json:"fields,omitempty"`
+		Rules  []schedulerRulePrompt  `json:"rules"`
+	}{Fields: fields, Rules: rules}
+	rulesJSON, err := json.Marshal(promptManifest)
 	if err != nil {
 		return nil, err
 	}
