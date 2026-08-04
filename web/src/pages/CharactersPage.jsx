@@ -158,6 +158,7 @@ export default function CharactersPage() {
   const [pendingCustomInputs, setPendingCustomInputs] = useState({ ...EMPTY_CUSTOM_INPUTS })
   const [generating, setGenerating] = useState(false)
   const [initializingStory, setInitializingStory] = useState(false)
+  const [pendingStoryCharacter, setPendingStoryCharacter] = useState(null)
 
   useEffect(() => {
     fetchCharacters()
@@ -183,9 +184,14 @@ export default function CharactersPage() {
     [pendingCustomInputs, pendingPresetUsage]
   )
 
-  const handleStoryChat = async (char, event) => {
+  const handleStoryChat = (char, event) => {
     event.stopPropagation()
-    if (initializingStory) return
+    if (!initializingStory) setPendingStoryCharacter(char)
+  }
+
+  const initializeStoryChat = async () => {
+    const char = pendingStoryCharacter
+    if (!char || initializingStory) return
     setInitializingStory(true)
     try {
       const result = await createStoryChat({
@@ -195,6 +201,7 @@ export default function CharactersPage() {
         compile_only_text: [char.description, char.personality, char.scenario].filter(Boolean).join('\n\n'),
       })
       const chat = result.chat || result.Chat
+      setPendingStoryCharacter(null)
       navigate(`/chats/${chat?.id || chat?.ID}`)
     } catch (err) {
       showToast(err.message || '复杂剧情初始化失败', 'error')
@@ -224,6 +231,10 @@ export default function CharactersPage() {
 
   const handleChat = async (char, event) => {
     event.stopPropagation()
+    if (char.tags?.includes('复杂剧情')) {
+      if (!initializingStory) setPendingStoryCharacter(char)
+      return
+    }
     try {
       const chat = await createChat(char.id, `与${char.name}的对话`)
       navigate(`/chats/${chat.id}`)
@@ -715,6 +726,60 @@ export default function CharactersPage() {
               <ArrowLeft size={14} />
               返回上一步
             </button>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={!!pendingStoryCharacter || initializingStory}
+        onClose={() => {
+          if (!initializingStory) setPendingStoryCharacter(null)
+        }}
+        title={initializingStory ? '初始化复杂剧情' : '选择聊天模式'}
+      >
+        {initializingStory ? (
+          <div className="py-8 text-center space-y-4">
+            <Loader2 size={38} className="mx-auto animate-spin text-primary-400" />
+            <div>
+              <p className="text-base font-medium text-gray-100">正在初始化剧情世界</p>
+              <p className="mt-2 text-sm text-gray-500">正在调用初始化模型编译角色卡，请不要关闭页面…</p>
+            </div>
+          </div>
+        ) : pendingStoryCharacter ? (
+          <div className="space-y-5">
+            <div className="flex items-center gap-3">
+              <Avatar name={pendingStoryCharacter.name} src={pendingStoryCharacter.avatar_url} size="lg" />
+              <div>
+                <p className="font-medium text-gray-100">{pendingStoryCharacter.name}</p>
+                <p className="mt-1 text-xs text-amber-300">这是复杂剧情角色卡</p>
+              </div>
+            </div>
+            <p className="text-sm leading-6 text-gray-300">
+              请选择聊天模式。动态模式会先初始化剧情世界，再由调度模型维护事实、事件和状态。
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  const character = pendingStoryCharacter
+                  setPendingStoryCharacter(null)
+                  try {
+                    const chat = await createChat(character.id, `与${character.name}的对话`)
+                    navigate(`/chats/${chat.id}`)
+                  } catch {
+                    showToast('创建对话失败', 'error')
+                  }
+                }}
+                className="flex-1 rounded-xl border border-surface-border py-2.5 text-sm text-gray-300 hover:bg-surface"
+              >
+                普通聊天
+              </button>
+              <button
+                onClick={initializeStoryChat}
+                className="flex-1 rounded-xl bg-primary-600 py-2.5 text-sm text-white hover:bg-primary-500"
+              >
+                动态模式
+              </button>
+            </div>
           </div>
         ) : null}
       </Modal>
