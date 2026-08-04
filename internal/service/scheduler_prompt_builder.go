@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+type schedulerRulePrompt struct {
+	ObservationKey string   `json:"observation_key"`
+	Value          any      `json:"value"`
+	Events         []string `json:"events,omitempty"`
+}
+
 type SchedulerPromptBuilder struct{}
 
 func NewSchedulerPromptBuilder() *SchedulerPromptBuilder { return &SchedulerPromptBuilder{} }
@@ -19,13 +25,20 @@ func (b *SchedulerPromptBuilder) Build(userContent, assistantContent string, sta
 	if err := json.Unmarshal([]byte(compiledManifest), &document); err != nil {
 		return nil, fmt.Errorf("decode scheduler manifest: %w", err)
 	}
-	filtered := manifestRuntimeDocument{ManifestVersion: document.ManifestVersion, Fields: document.Fields}
+	rules := make([]schedulerRulePrompt, 0, len(document.ObservationRules))
 	for _, rule := range document.ObservationRules {
-		if len(spec.AllowedObservationKeys) == 0 || spec.AllowedObservationKeys[rule.ObservationKey] {
-			filtered.ObservationRules = append(filtered.ObservationRules, rule)
+		if len(spec.AllowedObservationKeys) != 0 && !spec.AllowedObservationKeys[rule.ObservationKey] {
+			continue
 		}
+		events := make([]string, 0, len(rule.Events))
+		for _, event := range rule.Events {
+			if event.EventKey != "" {
+				events = append(events, event.EventKey)
+			}
+		}
+		rules = append(rules, schedulerRulePrompt{ObservationKey: rule.ObservationKey, Value: rule.Value, Events: events})
 	}
-	rulesJSON, err := json.Marshal(filtered)
+	rulesJSON, err := json.Marshal(rules)
 	if err != nil {
 		return nil, err
 	}
