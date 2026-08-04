@@ -115,15 +115,7 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	if err := r.messageStore.Create(userMessage); err != nil {
 		return ChatRuntimeResult{}, err
 	}
-	messages, spec, err := r.promptBuilder.BuildStoryPrompt(ctx, chat, history, input.Content, state)
-	if err != nil {
-		return ChatRuntimeResult{}, err
-	}
-	assistantContent, err := r.primaryClient.Stream(ctx, r.primaryModel, messages, callback)
-	if err != nil {
-		return ChatRuntimeResult{}, err
-	}
-	assistantMessage := &model.Message{ChatID: input.ChatID, Role: "assistant", Content: assistantContent}
+	assistantMessage := &model.Message{ChatID: input.ChatID, Role: "assistant", Content: ""}
 	if err := r.messageStore.Create(assistantMessage); err != nil {
 		return ChatRuntimeResult{}, err
 	}
@@ -136,14 +128,25 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 			return ChatRuntimeResult{}, err
 		}
 	}
-	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, messages, spec)
+	processed, err := r.turnProcessor.ProcessStoryTurn(ctx, record, state, nil, SchedulerValidationSpec{})
 	if err != nil {
 		_ = r.storyStore.MarkStoryTurnFailed(record.ChatID, record.ID, "processor_error", err.Error())
 		event := StoryRuntimeStatusEvent{Status: "failed", RecordID: record.ID, ErrorMessage: err.Error()}
 		if statusCallback != nil {
 			_ = statusCallback(event)
 		}
-		return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: err.Error()}, nil
+		return ChatRuntimeResult{AssistantMessageID: assistantMessage.ID, SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: err.Error()}, nil
+	}
+	messages, _, err := r.promptBuilder.BuildStoryPrompt(ctx, chat, history, input.Content, state)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	assistantContent, err := r.primaryClient.Stream(ctx, r.primaryModel, messages, callback)
+	if err != nil {
+		return ChatRuntimeResult{}, err
+	}
+	if err := r.messageStore.UpdateContent(assistantMessage.ID, assistantContent, 0); err != nil {
+		return ChatRuntimeResult{}, err
 	}
 	if statusCallback != nil {
 		_ = statusCallback(StoryRuntimeStatusEvent{Status: processed.Status, RecordID: processed.RecordID, ErrorMessage: processed.ErrorMessage})
