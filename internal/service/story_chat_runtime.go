@@ -137,6 +137,9 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 		}
 		return ChatRuntimeResult{AssistantMessageID: assistantMessage.ID, SchedulerStatus: "failed", SchedulerRecordID: record.ID, SchedulerError: err.Error()}, nil
 	}
+	if statusCallback != nil {
+		_ = statusCallback(StoryRuntimeStatusEvent{Status: processed.Status, RecordID: processed.RecordID, ErrorMessage: processed.ErrorMessage})
+	}
 	messages, _, err := r.promptBuilder.BuildStoryPrompt(ctx, chat, history, input.Content, state)
 	if err != nil {
 		return ChatRuntimeResult{}, err
@@ -147,9 +150,6 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	}
 	if err := r.messageStore.UpdateContent(assistantMessage.ID, assistantContent, 0); err != nil {
 		return ChatRuntimeResult{}, err
-	}
-	if statusCallback != nil {
-		_ = statusCallback(StoryRuntimeStatusEvent{Status: processed.Status, RecordID: processed.RecordID, ErrorMessage: processed.ErrorMessage})
 	}
 	return ChatRuntimeResult{AssistantContent: assistantContent, AssistantMessageID: assistantMessage.ID, SchedulerStatus: processed.Status, SchedulerRecordID: processed.RecordID, SchedulerError: processed.ErrorMessage}, nil
 }
