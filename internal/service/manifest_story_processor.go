@@ -181,6 +181,20 @@ func (p *ManifestStoryTurnProcessor) ProcessStoryTurn(
 	if err := json.Unmarshal([]byte(manifest.CompiledJSON), &document); err != nil {
 		return p.fail(record.ID, "manifest_error", err)
 	}
+	if len(spec.AllowedObservationKeys) == 0 {
+		spec.AllowedObservationKeys = make(map[string]bool, len(document.ObservationRules))
+	}
+	if len(spec.AllowedEventIDs) == 0 {
+		spec.AllowedEventIDs = make(map[string]bool)
+	}
+	for _, rule := range document.ObservationRules {
+		spec.AllowedObservationKeys[rule.ObservationKey] = true
+		for _, event := range rule.Events {
+			if event.EventKey != "" {
+				spec.AllowedEventIDs[event.EventKey] = true
+			}
+		}
+	}
 	fieldSpecs := make(map[string]FieldSpec, len(document.Fields))
 	for key, field := range document.Fields {
 		fieldSpecs[key] = FieldSpec{Type: field.Type, Writable: field.Writable, Allowed: field.Allowed, HasMin: field.Min != nil, HasMax: field.Max != nil}
