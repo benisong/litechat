@@ -171,15 +171,18 @@ func validateManifestJSON(raw string) error {
 				return fmt.Errorf("unsupported effect operation %s", effect.Operation)
 			}
 		}
+		filteredEvents := rule.Events[:0]
 		for _, event := range rule.Events {
 			if strings.TrimSpace(event.EventKey) == "" {
 				return fmt.Errorf("observation rule %d has empty event key", index)
 			}
 			if seenEvents[event.EventKey] {
-				return fmt.Errorf("duplicate event key %s", event.EventKey)
+				continue
 			}
 			seenEvents[event.EventKey] = true
+			filteredEvents = append(filteredEvents, event)
 		}
+		document.ObservationRules[index].Events = filteredEvents
 	}
 	return nil
 }
