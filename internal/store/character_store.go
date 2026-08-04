@@ -108,7 +108,9 @@ func (s *CharacterStore) Update(c *model.Character, userID string) error {
 
 func normalizeCharacterPOV(pov string) string {
 	switch pov {
-	case "second", "third":
+	case "second", "second_person":
+		return "second"
+	case "third":
 		return pov
 	default:
 		return "third"
