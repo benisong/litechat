@@ -18,6 +18,9 @@ func TestOpenAICompletionClientUsesConfiguredEndpointAndReturnsContent(t *testin
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
 		}
+		if r.Header.Get("Accept") != "application/json" || r.Header.Get("User-Agent") != "LiteChat/1.0" {
+			t.Errorf("missing completion compatibility headers: accept=%q user-agent=%q", r.Header.Get("Accept"), r.Header.Get("User-Agent"))
+		}
 		var request model.ChatCompletionRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Errorf("decode request: %v", err)

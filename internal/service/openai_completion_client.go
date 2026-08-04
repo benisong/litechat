@@ -71,6 +71,8 @@ func (c *OpenAICompletionClient) Complete(ctx context.Context, modelName string,
 		return "", fmt.Errorf("create completion request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "LiteChat/1.0")
 	if strings.TrimSpace(settings.APIKey) != "" {
 		req.Header.Set("Authorization", "Bearer "+settings.APIKey)
 	}
