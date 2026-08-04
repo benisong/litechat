@@ -24,6 +24,19 @@ type Character struct {
 	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// CharacterCardDocument 保存新 JSON 角色卡原文及其世界书版本，不把隐藏调度条目写入旧角色字段。
+type CharacterCardDocument struct {
+	ID               string    `json:"id" db:"id"`
+	UserID           string    `json:"user_id" db:"user_id"`
+	CharacterID      string    `json:"character_id" db:"character_id"`
+	CardVersion      string    `json:"card_version" db:"card_version"`
+	WorldBookID      string    `json:"worldbook_id" db:"worldbook_id"`
+	WorldBookVersion string    `json:"worldbook_version" db:"worldbook_version"`
+	SourceJSON       string    `json:"source_json" db:"source_json"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+}
+
 // CharacterDraft 角色卡草稿
 type CharacterDraft struct {
 	Name          string `json:"name"`

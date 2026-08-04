@@ -75,6 +75,19 @@ func (db *DB) InitSchema() error {
 		updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	-- 新 JSON 角色卡原文及嵌入式世界书文档
+	CREATE TABLE IF NOT EXISTS character_card_documents (
+		id                TEXT PRIMARY KEY,
+		user_id           TEXT NOT NULL,
+		character_id      TEXT NOT NULL UNIQUE REFERENCES characters(id) ON DELETE CASCADE,
+		card_version      TEXT NOT NULL,
+		worldbook_id      TEXT NOT NULL,
+		worldbook_version TEXT NOT NULL,
+		source_json       TEXT NOT NULL,
+		created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	-- 预设表
 	CREATE TABLE IF NOT EXISTS presets (
 		id            TEXT PRIMARY KEY,
