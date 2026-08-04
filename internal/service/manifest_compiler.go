@@ -119,8 +119,10 @@ func (c *ManifestCompiler) Compile(ctx context.Context, input ManifestCompileInp
 
 const manifestCompilerSystemPrompt = `你是剧情 Manifest 编译器。请把输入的完整剧情世界书编译成严格 JSON。
 只允许输出 manifest_version、fields、observation_rules 三个顶层字段。
-fields 的每个字段必须包含 type 和 writable；observation_rules 只能声明 observation_key、value、effects、events。
-不要输出 SQL、代码、解释文字或未声明字段。`
+manifest_version 必须输出数字 1，不要输出字符串 "1.0"。
+fields 的每个字段必须包含 type 和 writable；type 只能是 boolean、integer、number、string、enum、string_set、event_set，禁止使用 array 或其他类型。
+observation_rules 只能声明 observation_key、value、effects、events。
+不要输出 SQL、代码、解释文字或未声明字段。只输出 JSON。`
 
 func validateManifestJSON(raw string) error {
 	var document manifestRuntimeDocument

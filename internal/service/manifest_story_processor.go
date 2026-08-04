@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"litechat/internal/model"
 	"litechat/internal/store"
+	"strconv"
 )
 
 type manifestFieldJSON struct {
@@ -32,8 +34,37 @@ type manifestObservationRule struct {
 	Events         []manifestEventJSON `json:"events"`
 }
 
+type manifestVersionJSON int
+
+func (v *manifestVersionJSON) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return fmt.Errorf("manifest_version is empty")
+	}
+	if data[0] == '"' {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return err
+		}
+		f, err := strconv.ParseFloat(text, 64)
+		if err != nil || f != float64(int(f)) {
+			return fmt.Errorf("invalid manifest_version %q", text)
+		}
+		*v = manifestVersionJSON(int(f))
+		return nil
+	}
+	var number int
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	*v = manifestVersionJSON(number)
+	return nil
+}
+
+func (v manifestVersionJSON) MarshalJSON() ([]byte, error) { return json.Marshal(int(v)) }
+
 type manifestRuntimeDocument struct {
-	ManifestVersion  int                          `json:"manifest_version"`
+	ManifestVersion  manifestVersionJSON          `json:"manifest_version"`
 	Fields           map[string]manifestFieldJSON `json:"fields"`
 	ObservationRules []manifestObservationRule    `json:"observation_rules"`
 }
