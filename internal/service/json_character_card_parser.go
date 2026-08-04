@@ -96,6 +96,9 @@ func (jsonCharacterCardParser) Parse(_ context.Context, input []byte) (*ParsedCh
 	if strings.TrimSpace(envelope.WorldBook.Version) == "" {
 		return nil, fmt.Errorf("worldbook.version is required")
 	}
+	if err := applyJSONCardDefaults(input, &envelope.WorldBook); err != nil {
+		return nil, err
+	}
 	if err := normalizeWorldBookEntries(&envelope.WorldBook); err != nil {
 		return nil, err
 	}
@@ -106,6 +109,57 @@ func (jsonCharacterCardParser) Parse(_ context.Context, input []byte) (*ParsedCh
 		Tags:        envelope.Tags,
 		Extensions:  envelope.Extensions,
 	}, nil
+}
+
+func applyJSONCardDefaults(input []byte, book *ParsedWorldBook) error {
+	var raw struct {
+		WorldBook map[string]json.RawMessage `json:"worldbook"`
+	}
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw.WorldBook["global_enabled"]; !ok {
+		book.GlobalEnabled = true
+	}
+	for _, group := range []struct {
+		name    string
+		entries []ParsedWorldBookEntry
+	}{
+		{name: "main_entries", entries: book.MainEntries},
+		{name: "sub_entries", entries: book.SubEntries},
+	} {
+		var rawEntries []map[string]json.RawMessage
+		if data, ok := raw.WorldBook[group.name]; ok {
+			if err := json.Unmarshal(data, &rawEntries); err != nil {
+				return fmt.Errorf("decode worldbook.%s: %w", group.name, err)
+			}
+		}
+		for index := range group.entries {
+			if index >= len(rawEntries) {
+				continue
+			}
+			entry := &group.entries[index]
+			rawEntry := rawEntries[index]
+			if _, ok := rawEntry["enabled"]; !ok {
+				entry.Enabled = true
+			}
+			if _, ok := rawEntry["user_visible"]; !ok {
+				entry.UserVisible = true
+			}
+			if _, ok := rawEntry["injection_depth"]; !ok {
+				entry.InjectionDepth = 4
+			}
+			if _, ok := rawEntry["role"]; !ok {
+				entry.Role = "system"
+			}
+		}
+		if group.name == "main_entries" {
+			book.MainEntries = group.entries
+		} else {
+			book.SubEntries = group.entries
+		}
+	}
+	return nil
 }
 
 func normalizeWorldBookEntries(book *ParsedWorldBook) error {
