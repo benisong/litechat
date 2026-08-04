@@ -141,6 +141,8 @@ func validateManifestJSON(raw string) error {
 		if strings.TrimSpace(key) == "" {
 			return fmt.Errorf("manifest contains empty field key")
 		}
+		field.Type = resolveManifestFieldType(field.Type)
+		document.Fields[key] = field
 		if !validManifestFieldType(field.Type) {
 			return fmt.Errorf("field %s has invalid type %q", key, field.Type)
 		}
@@ -180,6 +182,26 @@ func validateManifestJSON(raw string) error {
 		}
 	}
 	return nil
+}
+
+func resolveManifestFieldType(fieldType string) string {
+	if validManifestFieldType(fieldType) {
+		return fieldType
+	}
+	candidates := []string{"boolean", "integer", "number", "string", "enum", "string_set", "event_set"}
+	best := ""
+	for _, candidate := range candidates {
+		if levenshteinDistance(fieldType, candidate) <= 1 {
+			if best != "" {
+				return fieldType
+			}
+			best = candidate
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return fieldType
 }
 
 func resolveManifestFieldName(name string, fields map[string]manifestFieldJSON) string {
