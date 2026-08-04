@@ -21,11 +21,9 @@ type OpenAICompletionClient struct {
 }
 
 func NewOpenAICompletionClient(settings *model.AppSettings) *OpenAICompletionClient {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ForceAttemptHTTP2 = false
 	return &OpenAICompletionClient{
 		settings:   settings,
-		httpClient: &http.Client{Timeout: 90 * time.Second, Transport: transport},
+		httpClient: &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
