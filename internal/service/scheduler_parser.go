@@ -27,6 +27,9 @@ func ParseSchedulerOutput(raw string) (*model.SchedulerOutput, error) {
 	if err := json.Unmarshal([]byte(jsonText), output); err != nil {
 		return nil, fmt.Errorf("decode scheduler output: %w", err)
 	}
+	if output.SchemaVersion == 0 {
+		output.SchemaVersion = schedulerOutputSchemaVersion
+	}
 	if output.SchemaVersion != schedulerOutputSchemaVersion {
 		return nil, fmt.Errorf("unsupported scheduler schema version: %d", output.SchemaVersion)
 	}
