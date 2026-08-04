@@ -157,9 +157,6 @@ func validateManifestJSON(raw string) error {
 		if strings.TrimSpace(rule.ObservationKey) == "" {
 			return fmt.Errorf("observation rule %d has empty key", index)
 		}
-		if _, ok := document.Fields[rule.ObservationKey]; !ok {
-			return fmt.Errorf("observation rule %d references undeclared key %s", index, rule.ObservationKey)
-		}
 		for _, effect := range rule.Effects {
 			field, ok := document.Fields[effect.Field]
 			if !ok {
