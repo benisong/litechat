@@ -37,7 +37,7 @@ func (s *JSONCharacterCardImportService) GetPublic(ctx context.Context, userID, 
 	if err != nil {
 		return nil, fmt.Errorf("load character card document: %w", err)
 	}
-	plan, err := BuildJSONCharacterCardImportPlan(ctx, []byte(doc.SourceJSON))
+	plan, err := BuildCharacterCardImportPlan(ctx, []byte(doc.SourceJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -45,37 +45,46 @@ func (s *JSONCharacterCardImportService) GetPublic(ctx context.Context, userID, 
 }
 
 func (s *JSONCharacterCardImportService) Import(ctx context.Context, userID string, input []byte) (*JSONCharacterCardImportResult, error) {
+	plan, err := BuildJSONCharacterCardImportPlan(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return s.importPlan(userID, input, plan)
+}
+
+func (s *JSONCharacterCardImportService) ImportAny(ctx context.Context, userID string, input []byte) (*JSONCharacterCardImportResult, error) {
+	plan, err := BuildCharacterCardImportPlan(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return s.importPlan(userID, input, plan)
+}
+
+func (s *JSONCharacterCardImportService) importPlan(userID string, input []byte, plan *JSONCharacterCardImportPlan) (*JSONCharacterCardImportResult, error) {
 	if s == nil || s.characters == nil || s.documents == nil {
 		return nil, fmt.Errorf("json character card import service is not configured")
 	}
 	if strings.TrimSpace(userID) == "" {
 		return nil, fmt.Errorf("user id is required")
 	}
-	plan, err := BuildJSONCharacterCardImportPlan(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-
 	character := &model.Character{
-		Name:        plan.Character.Name,
-		Description: plan.Character.Description,
-		Personality: plan.Character.Personality,
-		Scenario:    plan.Character.Scenario,
-		FirstMsg:    plan.Character.FirstMessage,
-		Tags:        strings.Join(plan.Tags, ","),
-		POV:         plan.Character.POV,
+		Name: plan.Character.Name, Description: plan.Character.Description,
+		Personality: plan.Character.Personality, Scenario: plan.Character.Scenario,
+		FirstMsg: plan.Character.FirstMessage, Tags: strings.Join(plan.Tags, ","), POV: plan.Character.POV,
 	}
 	if err := s.characters.Create(character, userID); err != nil {
 		return nil, fmt.Errorf("create imported character: %w", err)
 	}
-
+	worldBookID, worldBookVersion := plan.PublicWorldBook.ID, plan.PublicWorldBook.Version
+	if worldBookID == "" {
+		worldBookID = "legacy-worldbook"
+	}
+	if worldBookVersion == "" {
+		worldBookVersion = "legacy"
+	}
 	document := &model.CharacterCardDocument{
-		UserID:           userID,
-		CharacterID:      character.ID,
-		CardVersion:      plan.CardVersion,
-		WorldBookID:      plan.PublicWorldBook.ID,
-		WorldBookVersion: plan.PublicWorldBook.Version,
-		SourceJSON:       string(input),
+		UserID: userID, CharacterID: character.ID, CardVersion: plan.CardVersion,
+		WorldBookID: worldBookID, WorldBookVersion: worldBookVersion, SourceJSON: string(input),
 	}
 	if err := s.documents.Create(document); err != nil {
 		_ = s.characters.Delete(character.ID, userID)
