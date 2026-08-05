@@ -194,6 +194,12 @@ export const useCharacterStore = create((set, get) => ({
     return data
   },
 
+  importCharacterCard: async (card) => {
+    const data = await apiFetch('/characters/import', { method: 'POST', body: card })
+    set(s => ({ characters: [data.character || data, ...s.characters] }))
+    return data.character || data
+  },
+
   generateCharacterCard: async (choices) => {
     const data = await apiFetch('/characters/generate', {
       method: 'POST',

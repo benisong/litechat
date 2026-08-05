@@ -16,7 +16,7 @@ import EmptyState from '../components/ui/EmptyState'
 import ExpandableTextarea from '../components/ui/ExpandableTextarea'
 import Modal from '../components/ui/Modal'
 import { renderRolePlaceholders } from '../utils/placeholderRender'
-import liyuSystemPreset from '../data/liyu-normal-card-v1.json'
+import liyuSystemPreset from '../data/rebirth-fantasy-journey-complex-v1.json'
 
 const STEPS = [
   {
@@ -141,7 +141,7 @@ function getChoiceLabels(choices, usePresets) {
 export default function CharactersPage() {
   const navigate = useNavigate()
   const user = useAuthStore(state => state.user)
-  const { characters, fetchCharacters, deleteCharacter, generateCharacterCard, createCharacter } = useCharacterStore()
+  const { characters, fetchCharacters, deleteCharacter, generateCharacterCard, createCharacter, importCharacterCard } = useCharacterStore()
   const { createChat, createStoryChat } = useChatStore()
   const { showToast } = useUIStore()
 
@@ -212,14 +212,9 @@ export default function CharactersPage() {
 
   const handleImportSystemPreset = async () => {
     try {
-      const character = await createCharacter({
-        name: liyuSystemPreset.name,
-        description: liyuSystemPreset.description,
-        personality: liyuSystemPreset.personality,
-        scenario: liyuSystemPreset.scenario,
-        first_msg: liyuSystemPreset.first_msg,
-        tags: `${liyuSystemPreset.tags},系统预制,复杂剧情`,
-        pov: liyuSystemPreset.pov || 'second',
+      const character = await importCharacterCard({
+        ...liyuSystemPreset,
+        tags: [...(liyuSystemPreset.tags || []), '系统预制', '复杂剧情'],
       })
       setShowTemplatePrompt(false)
       showToast('系统预制角色卡已导入', 'success')
