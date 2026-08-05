@@ -681,7 +681,14 @@ func (h *Handlers) UpdateCharacter(c *gin.Context) {
 // DeleteCharacter DELETE /api/characters/:id
 func (h *Handlers) DeleteCharacter(c *gin.Context) {
 	userID := GetUserID(c)
-	if err := h.characterStore.Delete(c.Param("id"), userID); err != nil {
+	characterID := c.Param("id")
+	if h.worldBookStore != nil {
+		if err := h.worldBookStore.DeleteByCharacterID(characterID, userID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := h.characterStore.Delete(characterID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

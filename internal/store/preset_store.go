@@ -259,6 +259,11 @@ func (s *WorldBookStore) Delete(id string, userID string) error {
 	return err
 }
 
+func (s *WorldBookStore) DeleteByCharacterID(characterID string, userID string) error {
+	_, err := s.db.Exec(`DELETE FROM world_books WHERE character_id = ? AND user_id = ?`, characterID, userID)
+	return err
+}
+
 // 世界书条目操作
 func (s *WorldBookStore) CreateEntry(e *model.WorldBookEntry, userID string) error {
 	e.ID = uuid.New().String()
