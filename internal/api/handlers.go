@@ -623,6 +623,25 @@ func (h *Handlers) GenerateCharacterCard(c *gin.Context) {
 	c.JSON(http.StatusOK, model.GenerateCharacterCardResponse{Draft: *draft})
 }
 
+// ImportCharacterCard POST /api/characters/import
+func (h *Handlers) ImportCharacterCard(c *gin.Context) {
+	if h.jsonCardImporter == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "角色卡导入器尚未配置"})
+		return
+	}
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "读取角色卡数据失败"})
+		return
+	}
+	result, err := h.jsonCardImporter.ImportAny(c.Request.Context(), GetUserID(c), raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"character": result.Character, "card_version": result.Plan.CardVersion, "worldbook": result.Plan.PublicWorldBook})
+}
+
 // GetJSONCharacterCardDocument GET /api/characters/:id/card-document
 func (h *Handlers) GetJSONCharacterCardDocument(c *gin.Context) {
 	if h.jsonCardImporter == nil {
