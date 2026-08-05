@@ -23,8 +23,10 @@ func TestImportJSONCharacterCardHidesSchedulerEntriesFromResponse(t *testing.T) 
 		t.Fatalf("init schema: %v", err)
 	}
 
-	h := NewHandlers(store.NewCharacterStore(db), nil, nil, nil, nil, nil, nil, nil, nil)
-	h.SetJSONCharacterCardImporter(service.NewJSONCharacterCardImportService(store.NewCharacterStore(db), store.NewCharacterCardDocumentStore(db)))
+	chars := store.NewCharacterStore(db)
+	worldBooks := store.NewWorldBookStore(db)
+	h := NewHandlers(chars, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.SetJSONCharacterCardImporter(service.NewJSONCharacterCardImportService(chars, store.NewCharacterCardDocumentStore(db), worldBooks))
 	raw := []byte(`{"card_version":"1.0","character":{"name":"重生之玄幻之旅","pov":"second","description":"公开身份","personality":"性格","scenario":"场景","first_message":"开场"},"worldbook":{"id":"w","version":"1.0","global_enabled":true,"main_entries":[{"id":"public","title":"公开","content":"公开内容","user_visible":true,"scheduler_enabled":false},{"id":"hidden","title":"隐藏","content":"隐藏调度内容","user_visible":false,"scheduler_enabled":true}]}}`)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -48,6 +50,14 @@ func TestImportJSONCharacterCardHidesSchedulerEntriesFromResponse(t *testing.T) 
 	}
 	if response.Character.ID == "" {
 		t.Fatal("response did not include created character")
+	}
+	worldbookList, err := worldBooks.List("user-1")
+	if err != nil || len(worldbookList) != 1 {
+		t.Fatalf("public worldbook was not created: books=%+v err=%v", worldbookList, err)
+	}
+	linkedWorldBook, err := worldBooks.GetByID(worldbookList[0].ID, "user-1")
+	if err != nil || len(linkedWorldBook.Entries) != 1 || linkedWorldBook.Entries[0].Content != "公开内容" {
+		t.Fatalf("public worldbook entries were not linked: book=%+v err=%v", linkedWorldBook, err)
 	}
 
 	readRecorder := httptest.NewRecorder()

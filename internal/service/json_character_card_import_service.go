@@ -11,6 +11,7 @@ import (
 type JSONCharacterCardImportService struct {
 	characters *store.CharacterStore
 	documents  *store.CharacterCardDocumentStore
+	worldBooks *store.WorldBookStore
 }
 
 type JSONCharacterCardImportResult struct {
@@ -25,8 +26,12 @@ type JSONCharacterCardPublicView struct {
 	WorldBook   ParsedWorldBook `json:"worldbook"`
 }
 
-func NewJSONCharacterCardImportService(characters *store.CharacterStore, documents *store.CharacterCardDocumentStore) *JSONCharacterCardImportService {
-	return &JSONCharacterCardImportService{characters: characters, documents: documents}
+func NewJSONCharacterCardImportService(characters *store.CharacterStore, documents *store.CharacterCardDocumentStore, worldBooks ...*store.WorldBookStore) *JSONCharacterCardImportService {
+	var worldBookStore *store.WorldBookStore
+	if len(worldBooks) > 0 {
+		worldBookStore = worldBooks[0]
+	}
+	return &JSONCharacterCardImportService{characters: characters, documents: documents, worldBooks: worldBookStore}
 }
 
 func (s *JSONCharacterCardImportService) GetPublic(ctx context.Context, userID, characterID string) (*JSONCharacterCardPublicView, error) {
@@ -82,13 +87,49 @@ func (s *JSONCharacterCardImportService) importPlan(userID string, input []byte,
 	if worldBookVersion == "" {
 		worldBookVersion = "legacy"
 	}
+	var linkedWorldBookID string
+	if s.worldBooks != nil && (len(plan.PublicWorldBook.MainEntries) > 0 || len(plan.PublicWorldBook.SubEntries) > 0 || plan.PublicWorldBook.Name != "") {
+		worldBook := &model.WorldBook{Name: plan.PublicWorldBook.Name, CharacterID: character.ID, RuntimeMode: "static"}
+		if err := s.worldBooks.Create(worldBook, userID); err != nil {
+			_ = s.characters.Delete(character.ID, userID)
+			return nil, fmt.Errorf("create imported worldbook: %w", err)
+		}
+		linkedWorldBookID = worldBook.ID
+		for _, entry := range publicWorldBookEntries(plan.PublicWorldBook, linkedWorldBookID) {
+			if err := s.worldBooks.CreateEntry(&entry, userID); err != nil {
+				_ = s.worldBooks.Delete(linkedWorldBookID, userID)
+				_ = s.characters.Delete(character.ID, userID)
+				return nil, fmt.Errorf("create imported worldbook entry: %w", err)
+			}
+		}
+		worldBookID = linkedWorldBookID
+	}
 	document := &model.CharacterCardDocument{
 		UserID: userID, CharacterID: character.ID, CardVersion: plan.CardVersion,
 		WorldBookID: worldBookID, WorldBookVersion: worldBookVersion, SourceJSON: string(input),
 	}
 	if err := s.documents.Create(document); err != nil {
+		if linkedWorldBookID != "" {
+			_ = s.worldBooks.Delete(linkedWorldBookID, userID)
+		}
 		_ = s.characters.Delete(character.ID, userID)
 		return nil, fmt.Errorf("save imported character document: %w", err)
 	}
 	return &JSONCharacterCardImportResult{Character: character, Document: document, Plan: plan}, nil
+}
+
+func publicWorldBookEntries(book ParsedWorldBook, worldBookID string) []model.WorldBookEntry {
+	entries := make([]model.WorldBookEntry, 0, len(book.MainEntries)+len(book.SubEntries))
+	for _, source := range append(append([]ParsedWorldBookEntry{}, book.MainEntries...), book.SubEntries...) {
+		if !source.Enabled || !source.UserVisible {
+			continue
+		}
+		entries = append(entries, model.WorldBookEntry{
+			WorldBookID: worldBookID, Keys: source.Keys, SecondaryKeys: source.SecondaryKeys,
+			Content: source.Content, Enabled: source.Enabled, Constant: source.Constant,
+			Priority: source.Priority, InjectionPos: source.InjectionPosition, InjectionDepth: source.InjectionDepth,
+			ScanDepth: source.ScanDepth, CaseSensitive: source.CaseSensitive, Order: source.Order, Role: source.Role,
+		})
+	}
+	return entries
 }

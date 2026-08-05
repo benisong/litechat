@@ -133,7 +133,7 @@ func main() {
 	)
 	handlers.SetStoryMessageRuntime(storyRuntime)
 	handlers.SetStorySchedulerRetryRuntime(storyRuntime)
-	handlers.SetJSONCharacterCardImporter(service.NewJSONCharacterCardImportService(characterStore, characterCardDocumentStore))
+	handlers.SetJSONCharacterCardImporter(service.NewJSONCharacterCardImportService(characterStore, characterCardDocumentStore, worldBookStore))
 
 	r := api.SetupRouter(handlers)
 
