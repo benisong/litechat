@@ -49,4 +49,14 @@ func TestImportJSONCharacterCardHidesSchedulerEntriesFromResponse(t *testing.T) 
 	if response.Character.ID == "" {
 		t.Fatal("response did not include created character")
 	}
+
+	readRecorder := httptest.NewRecorder()
+	readCtx, _ := gin.CreateTestContext(readRecorder)
+	readCtx.Request = httptest.NewRequest("GET", "/api/characters/"+response.Character.ID+"/card-document", nil)
+	readCtx.Set("user_id", "user-1")
+	readCtx.Params = gin.Params{{Key: "id", Value: response.Character.ID}}
+	h.GetJSONCharacterCardDocument(readCtx)
+	if readRecorder.Code != 200 || !strings.Contains(readRecorder.Body.String(), "公开内容") || strings.Contains(readRecorder.Body.String(), "隐藏调度内容") {
+		t.Fatalf("public document response is invalid: status=%d body=%s", readRecorder.Code, readRecorder.Body.String())
+	}
 }

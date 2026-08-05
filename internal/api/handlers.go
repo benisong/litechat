@@ -623,6 +623,20 @@ func (h *Handlers) GenerateCharacterCard(c *gin.Context) {
 	c.JSON(http.StatusOK, model.GenerateCharacterCardResponse{Draft: *draft})
 }
 
+// GetJSONCharacterCardDocument GET /api/characters/:id/card-document
+func (h *Handlers) GetJSONCharacterCardDocument(c *gin.Context) {
+	if h.jsonCardImporter == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "JSON 角色卡读取器尚未配置"})
+		return
+	}
+	view, err := h.jsonCardImporter.GetPublic(c.Request.Context(), GetUserID(c), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "JSON 角色卡文档不存在"})
+		return
+	}
+	c.JSON(http.StatusOK, view)
+}
+
 // UpdateCharacter PUT /api/characters/:id
 func (h *Handlers) UpdateCharacter(c *gin.Context) {
 	userID := GetUserID(c)

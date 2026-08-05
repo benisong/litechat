@@ -42,6 +42,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		api.POST("/characters/import/json", h.ImportJSONCharacterCard)
 		api.POST("/characters/generate", h.GenerateCharacterCard)
 		api.GET("/characters/:id", h.GetCharacter)
+		api.GET("/characters/:id/card-document", h.GetJSONCharacterCardDocument)
 		api.PUT("/characters/:id", h.UpdateCharacter)
 		api.DELETE("/characters/:id", h.DeleteCharacter)
 

@@ -19,8 +19,29 @@ type JSONCharacterCardImportResult struct {
 	Plan      *JSONCharacterCardImportPlan
 }
 
+type JSONCharacterCardPublicView struct {
+	CharacterID string
+	CardVersion string
+	WorldBook   ParsedWorldBook
+}
+
 func NewJSONCharacterCardImportService(characters *store.CharacterStore, documents *store.CharacterCardDocumentStore) *JSONCharacterCardImportService {
 	return &JSONCharacterCardImportService{characters: characters, documents: documents}
+}
+
+func (s *JSONCharacterCardImportService) GetPublic(ctx context.Context, userID, characterID string) (*JSONCharacterCardPublicView, error) {
+	if s == nil || s.documents == nil {
+		return nil, fmt.Errorf("json character card import service is not configured")
+	}
+	doc, err := s.documents.GetByCharacterID(characterID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load character card document: %w", err)
+	}
+	plan, err := BuildJSONCharacterCardImportPlan(ctx, []byte(doc.SourceJSON))
+	if err != nil {
+		return nil, err
+	}
+	return &JSONCharacterCardPublicView{CharacterID: characterID, CardVersion: plan.CardVersion, WorldBook: plan.PublicWorldBook}, nil
 }
 
 func (s *JSONCharacterCardImportService) Import(ctx context.Context, userID string, input []byte) (*JSONCharacterCardImportResult, error) {
