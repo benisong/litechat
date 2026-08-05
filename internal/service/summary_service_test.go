@@ -339,7 +339,11 @@ func TestPendingSummaryDoesNotBlockChatAndOnlyAffectsLaterContext(t *testing.T) 
 
 	close(releaseSummary)
 	waitForSummaryState(t, svc, chatID, func(state *model.ChatSummaryState) bool {
-		return state.AppliedCutoffSeq == 2 && state.PendingToSeq == 0 && state.PendingStatus == ""
+		if state.AppliedCutoffSeq != 2 || state.PendingToSeq != 0 || state.PendingStatus != "" {
+			return false
+		}
+		context, _ := svc.BuildServiceModeContext(chatID, listSummaryTestMessages(t, svc.messageStore, chatID))
+		return strings.Contains(context, "剧情继续推进")
 	})
 
 	historyAfterSuccess := listSummaryTestMessages(t, svc.messageStore, chatID)

@@ -241,28 +241,45 @@ func (s *MessageStore) Create(msg *model.Message) error {
 	msg.ID = uuid.New().String()
 	msg.CreatedAt = time.Now()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 0; attempt < 8; attempt++ {
+		tx, err := s.db.Begin()
+		if err == nil {
+			if err = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE chat_id = ?`, msg.ChatID).Scan(&msg.Seq); err == nil {
+				_, err = tx.Exec(`
+					INSERT INTO messages (id, chat_id, seq, role, content, status_bar, tokens, created_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+					msg.ID, msg.ChatID, msg.Seq, msg.Role, msg.Content, msg.StatusBar, msg.Tokens, msg.CreatedAt,
+				)
+			}
+			if err == nil {
+				err = tx.Commit()
+				if err != nil {
+					_ = tx.Rollback()
+				}
+			} else {
+				_ = tx.Rollback()
+			}
+		}
+		if err == nil {
+			s.cacheLatestAssistantMessage(msg)
+			return nil
+		}
+		lastErr = err
+		if !isSQLiteBusy(err) || attempt == 7 {
+			return err
+		}
+		time.Sleep(time.Duration(5*(attempt+1)) * time.Millisecond)
 	}
-	defer tx.Rollback()
+	return lastErr
+}
 
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE chat_id = ?`, msg.ChatID).Scan(&msg.Seq); err != nil {
-		return err
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	if _, err := tx.Exec(`
-		INSERT INTO messages (id, chat_id, seq, role, content, status_bar, tokens, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.ChatID, msg.Seq, msg.Role, msg.Content, msg.StatusBar, msg.Tokens, msg.CreatedAt,
-	); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.cacheLatestAssistantMessage(msg)
-	return nil
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "database is locked") || strings.Contains(text, "database is busy") || strings.Contains(text, "sqlite_busy")
 }
 
 // ListByChatID 查询对话的所有消息
