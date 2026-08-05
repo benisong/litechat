@@ -56,7 +56,7 @@ func TestImportJSONCharacterCardHidesSchedulerEntriesFromResponse(t *testing.T) 
 	readCtx.Set("user_id", "user-1")
 	readCtx.Params = gin.Params{{Key: "id", Value: response.Character.ID}}
 	h.GetJSONCharacterCardDocument(readCtx)
-	if readRecorder.Code != 200 || !strings.Contains(readRecorder.Body.String(), "公开内容") || strings.Contains(readRecorder.Body.String(), "隐藏调度内容") {
+	if readRecorder.Code != 200 || !strings.Contains(readRecorder.Body.String(), `"character_id"`) || !strings.Contains(readRecorder.Body.String(), "公开内容") || strings.Contains(readRecorder.Body.String(), "隐藏调度内容") {
 		t.Fatalf("public document response is invalid: status=%d body=%s", readRecorder.Code, readRecorder.Body.String())
 	}
 }

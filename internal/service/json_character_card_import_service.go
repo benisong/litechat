@@ -20,9 +20,9 @@ type JSONCharacterCardImportResult struct {
 }
 
 type JSONCharacterCardPublicView struct {
-	CharacterID string
-	CardVersion string
-	WorldBook   ParsedWorldBook
+	CharacterID string          `json:"character_id"`
+	CardVersion string          `json:"card_version"`
+	WorldBook   ParsedWorldBook `json:"worldbook"`
 }
 
 func NewJSONCharacterCardImportService(characters *store.CharacterStore, documents *store.CharacterCardDocumentStore) *JSONCharacterCardImportService {
