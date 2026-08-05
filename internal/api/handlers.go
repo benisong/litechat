@@ -30,6 +30,7 @@ type Handlers struct {
 	storyInitializer *service.StoryChatInitializer
 	storyRuntime     service.StoryMessageRuntime
 	storyRetry       service.StorySchedulerRetryRuntime
+	jsonCardImporter *service.JSONCharacterCardImportService
 }
 
 const (
@@ -265,6 +266,10 @@ func NewHandlers(
 		h.storyInitializer = storyInitializers[0]
 	}
 	return h
+}
+
+func (h *Handlers) SetJSONCharacterCardImporter(importer *service.JSONCharacterCardImportService) {
+	h.jsonCardImporter = importer
 }
 
 func (h *Handlers) SetStoryMessageRuntime(runtime service.StoryMessageRuntime) {
@@ -576,6 +581,29 @@ func (h *Handlers) CreateCharacter(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, char)
+}
+
+// ImportJSONCharacterCard POST /api/characters/import/json
+func (h *Handlers) ImportJSONCharacterCard(c *gin.Context) {
+	if h.jsonCardImporter == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "JSON 角色卡导入器尚未配置"})
+		return
+	}
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "读取角色卡 JSON 失败"})
+		return
+	}
+	result, err := h.jsonCardImporter.Import(c.Request.Context(), GetUserID(c), raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"character":    result.Character,
+		"card_version": result.Plan.CardVersion,
+		"worldbook":    result.Plan.PublicWorldBook,
+	})
 }
 
 // GenerateCharacterCard POST /api/characters/generate

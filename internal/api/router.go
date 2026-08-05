@@ -39,6 +39,7 @@ func SetupRouter(h *Handlers) *gin.Engine {
 		// 角色卡
 		api.GET("/characters", h.ListCharacters)
 		api.POST("/characters", h.CreateCharacter)
+		api.POST("/characters/import/json", h.ImportJSONCharacterCard)
 		api.POST("/characters/generate", h.GenerateCharacterCard)
 		api.GET("/characters/:id", h.GetCharacter)
 		api.PUT("/characters/:id", h.UpdateCharacter)

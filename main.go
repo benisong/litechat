@@ -53,6 +53,7 @@ func main() {
 	messageStore := store.NewMessageStore(db)
 	presetStore := store.NewPresetStore(db)
 	worldBookStore := store.NewWorldBookStore(db)
+	characterCardDocumentStore := store.NewCharacterCardDocumentStore(db)
 	configStore := store.NewConfigStore(db)
 	userStore := store.NewUserStore(db)
 	summaryStore := store.NewSummaryStore(summaryDB, db)
@@ -132,6 +133,7 @@ func main() {
 	)
 	handlers.SetStoryMessageRuntime(storyRuntime)
 	handlers.SetStorySchedulerRetryRuntime(storyRuntime)
+	handlers.SetJSONCharacterCardImporter(service.NewJSONCharacterCardImportService(characterStore, characterCardDocumentStore))
 
 	r := api.SetupRouter(handlers)
 
