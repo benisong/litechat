@@ -9,6 +9,7 @@ type CharacterCardParserRegistry struct {
 func NewCharacterCardParserRegistry() *CharacterCardParserRegistry {
 	registry := &CharacterCardParserRegistry{parsers: make(map[string]map[string]CharacterCardParser)}
 	registry.Register("json-character-card", "1.0", NewJSONCharacterCardParser())
+	registry.Register("legacy-character-card", "legacy", NewLegacyCharacterCardParser())
 	return registry
 }
 
