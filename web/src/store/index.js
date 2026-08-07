@@ -490,7 +490,27 @@ export const useChatStore = create((set, get) => ({
         throw new Error(body?.error || `发送失败（HTTP ${res.status}）`)
       }
 
-      const reader = res.body.getReader()
+      const syncPersistedUser = (async () => {
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const snapshot = await apiFetch(`/chats/${chatId}/messages`)
+          const normalized = normalizeChatMessages(snapshot)
+          const persistedUser = normalized.find(message => (
+            message.role === 'user'
+            && message.content === content
+            && Number(message.seq) > Number(get().streamBaseSeq || 0)
+          ))
+          if (persistedUser) {
+            set(s => (
+              s.activeChatId === chatId && s.streamingChatId === chatId
+                ? { messages: [...normalized, aiMsgPlaceholder] }
+                : {}
+            ))
+            return
+          }
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      })()
+
       const decoder = new TextDecoder()
       let fullContent = ''
       let buffer = '' // 行缓冲，处理跨 chunk 的 SSE 行
@@ -540,6 +560,7 @@ export const useChatStore = create((set, get) => ({
         }
       }
 
+      await syncPersistedUser
       // 流式结束，刷新消息列表
       const freshMessages = await apiFetch(`/chats/${chatId}/messages`)
       const responseTimeSeconds = Math.max(0, (Date.now() - requestStartedAt) / 1000)
