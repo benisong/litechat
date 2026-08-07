@@ -1027,7 +1027,18 @@ func (h *Handlers) SendMessage(c *gin.Context) {
 		return nil
 	}
 
-	_, err := h.chatService.SendMessage(chatID, req.Content, req.PresetID, userID, callback)
+	userEvent := func(message *model.Message) error {
+		payload, err := json.Marshal(map[string]any{"user_message": message})
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", payload); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+	_, err := h.chatService.SendMessageWithUserEvent(chatID, req.Content, req.PresetID, userID, callback, userEvent)
 	if err != nil {
 		fmt.Fprintf(c.Writer, "data: {\"error\":%q}\n\n", err.Error())
 		flusher.Flush()

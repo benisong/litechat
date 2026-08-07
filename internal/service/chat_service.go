@@ -84,14 +84,19 @@ func (s *ChatService) finishTurn(chatID string) {
 
 // SendMessage handles one user turn. Background summaries never gate chat generation.
 func (s *ChatService) SendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
+	return s.SendMessageWithUserEvent(chatID, content, presetID, userID, callback, nil)
+}
+
+// SendMessageWithUserEvent is SendMessage plus a callback fired after the user message is persisted.
+func (s *ChatService) SendMessageWithUserEvent(chatID, content, presetID, userID string, callback StreamCallback, userEvent func(*model.Message) error) (string, error) {
 	if !s.beginTurn(chatID) {
 		return "", ErrChatBusy
 	}
 	defer s.finishTurn(chatID)
-	return s.sendMessage(chatID, content, presetID, userID, callback)
+	return s.sendMessage(chatID, content, presetID, userID, callback, userEvent)
 }
 
-func (s *ChatService) sendMessage(chatID, content, presetID, userID string, callback StreamCallback) (string, error) {
+func (s *ChatService) sendMessage(chatID, content, presetID, userID string, callback StreamCallback, userEvent func(*model.Message) error) (string, error) {
 	// 读取会话并校验归属当前用户
 	chat, err := s.chatStore.GetByID(chatID, userID)
 	if err != nil {
@@ -177,6 +182,11 @@ func (s *ChatService) sendMessage(chatID, content, presetID, userID string, call
 	}
 	if err := s.messageStore.Create(userMsg); err != nil {
 		return "", fmt.Errorf("保存用户消息失败: %w", err)
+	}
+	if userEvent != nil {
+		if err := userEvent(userMsg); err != nil {
+			return "", fmt.Errorf("发送用户消息事件失败: %w", err)
+		}
 	}
 	var summaryStage <-chan struct{}
 	if s.summaryService != nil {

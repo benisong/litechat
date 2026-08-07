@@ -538,6 +538,13 @@ export const useChatStore = create((set, get) => ({
             const parsed = JSON.parse(data)
             if (parsed.done) { streamDone = true; break }
             if (parsed.error) throw new Error(parsed.error)
+            if (parsed.user_message) {
+              set(s => {
+                if (s.messages.some(message => message.id === parsed.user_message.id)) return {}
+                const withoutPlaceholder = s.messages.filter(message => message.id !== aiMsgPlaceholder.id)
+                return { messages: normalizeChatMessages([...withoutPlaceholder, parsed.user_message, aiMsgPlaceholder]) }
+              })
+            }
             if (parsed.warning) {
               useUIStore.getState().showToast(parsed.warning, 'warning')
             }
