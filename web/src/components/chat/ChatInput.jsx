@@ -11,8 +11,11 @@ const INPUT_TOOLS = [
 export default function ChatInput({ onSend, disabled }) {
   const [text, setText] = useState('')
   const [activeTool, setActiveTool] = useState('colon')
+  const [sending, setSending] = useState(false)
   const textareaRef = useRef(null)
   const sendingRef = useRef(false)
+
+  const inputDisabled = disabled || sending
 
   // 自动调整高度
   useEffect(() => {
@@ -24,11 +27,12 @@ export default function ChatInput({ onSend, disabled }) {
 
   const handleSend = async () => {
     const content = text.trim()
-    if (!content || disabled || sendingRef.current) return
+    if (!content || inputDisabled || sendingRef.current) return
 
     // React props are refreshed on the next render. A synchronous ref closes
     // the small window in which a double tap / repeated Enter could submit twice.
     sendingRef.current = true
+    setSending(true)
     setText('')
     setActiveTool('colon')
     // 重置高度
@@ -41,6 +45,7 @@ export default function ChatInput({ onSend, disabled }) {
       if (err?.canResend) setText(content)
     } finally {
       sendingRef.current = false
+      setSending(false)
     }
   }
 
@@ -92,14 +97,14 @@ export default function ChatInput({ onSend, disabled }) {
           <button
             key={tool.key}
             onClick={() => handleToolClick(tool)}
-            disabled={disabled}
+            disabled={inputDisabled}
             className={clsx(
               'px-3 py-1 rounded-lg text-xs font-mono transition-all duration-150',
               'border active:scale-95',
               activeTool === tool.key
                 ? 'bg-primary-600/20 border-primary-500/50 text-primary-300'
                 : 'bg-surface border-surface-border text-gray-500 hover:text-gray-300 hover:border-gray-500',
-              disabled && 'opacity-50 cursor-not-allowed'
+              inputDisabled && 'opacity-50 cursor-not-allowed'
             )}
           >
             {tool.label}
@@ -108,6 +113,9 @@ export default function ChatInput({ onSend, disabled }) {
         <span className="text-[10px] text-gray-600 ml-1">
           {activeTool === 'quote' ? '对白' : activeTool === 'paren' ? '内心' : '叙述'}
         </span>
+        {inputDisabled && (
+          <span className="text-xs text-primary-300/80 animate-pulse">正在输入…</span>
+        )}
       </div>
 
       <div className="flex items-end gap-3">
@@ -118,29 +126,29 @@ export default function ChatInput({ onSend, disabled }) {
           onKeyDown={handleKeyDown}
           placeholder="发送消息…"
           rows={1}
-          disabled={disabled}
+          disabled={inputDisabled}
           className={clsx(
             'flex-1 bg-surface border border-surface-border rounded-2xl',
             'px-4 py-3 text-sm text-white placeholder-gray-500',
             'outline-none focus:border-primary-500/60 focus:ring-1 focus:ring-primary-500/20',
             'resize-none transition-all duration-200',
             'max-h-40 overflow-y-auto',
-            disabled && 'opacity-50 cursor-not-allowed'
+            inputDisabled && 'opacity-50 cursor-not-allowed'
           )}
         />
 
         <button
           onClick={handleSend}
-          disabled={!text.trim() || disabled}
+          disabled={!text.trim() || inputDisabled}
           className={clsx(
             'w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0',
             'transition-all duration-150 active:scale-90',
-            text.trim() && !disabled
+            text.trim() && !inputDisabled
               ? 'bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/30'
               : 'bg-surface border border-surface-border text-gray-600 cursor-not-allowed'
           )}
         >
-          {disabled
+          {inputDisabled
             ? <Loader2 size={18} className="animate-spin" />
             : <Send size={18} className={text.trim() ? '' : 'opacity-50'} />
           }
