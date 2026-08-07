@@ -374,6 +374,7 @@ func (db *DB) InitSchema() error {
 	db.Exec(`ALTER TABLE chat_summary_chunks ADD COLUMN to_message_id TEXT DEFAULT ''`)
 
 	// 兼容旧数据库：添加 user_id 列（已存在则忽略）
+	db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_chat_seq ON messages(chat_id, seq) WHERE seq > 0`)
 	db.Exec(`ALTER TABLE characters ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE chats ADD COLUMN user_id TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE chats ADD COLUMN scheduler_enabled INTEGER NOT NULL DEFAULT 0`)

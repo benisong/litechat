@@ -26,10 +26,18 @@ export function splitStatusBar(content) {
 export function normalizeChatMessages(messages, latestStreamContent = '') {
   if (!Array.isArray(messages)) return []
 
-  const latestAssistantIndex = [...messages].map(message => message.role).lastIndexOf('assistant')
+  const orderedMessages = [...messages].sort((left, right) => {
+    const leftSeq = Number(left?.seq) || 0
+    const rightSeq = Number(right?.seq) || 0
+    if (leftSeq > 0 && rightSeq > 0 && leftSeq !== rightSeq) return leftSeq - rightSeq
+    const leftTime = Date.parse(left?.created_at || '') || 0
+    const rightTime = Date.parse(right?.created_at || '') || 0
+    return leftTime - rightTime
+  })
+  const latestAssistantIndex = orderedMessages.map(message => message.role).lastIndexOf('assistant')
   const streamed = splitStatusBar(latestStreamContent)
 
-  return messages.map((message, index) => {
+  return orderedMessages.map((message, index) => {
     if (message?.role !== 'assistant') return message
 
     const embedded = splitStatusBar(message.content)

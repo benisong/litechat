@@ -242,7 +242,7 @@ func (s *MessageStore) Create(msg *model.Message) error {
 	msg.CreatedAt = time.Now()
 
 	var lastErr error
-	for attempt := 0; attempt < 8; attempt++ {
+	for attempt := 0; attempt < 20; attempt++ {
 		tx, err := s.db.Begin()
 		if err == nil {
 			if err = tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE chat_id = ?`, msg.ChatID).Scan(&msg.Seq); err == nil {
@@ -266,7 +266,7 @@ func (s *MessageStore) Create(msg *model.Message) error {
 			return nil
 		}
 		lastErr = err
-		if !isSQLiteBusy(err) || attempt == 7 {
+		if !isSQLiteRetryableMessageWrite(err) || attempt == 19 {
 			return err
 		}
 		time.Sleep(time.Duration(5*(attempt+1)) * time.Millisecond)
@@ -280,6 +280,17 @@ func isSQLiteBusy(err error) bool {
 	}
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "database is locked") || strings.Contains(text, "database is busy") || strings.Contains(text, "sqlite_busy")
+}
+
+func isSQLiteRetryableMessageWrite(err error) bool {
+	if isSQLiteBusy(err) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "unique constraint failed") && strings.Contains(text, "messages.chat_id") && strings.Contains(text, "messages.seq")
 }
 
 // ListByChatID 查询对话的所有消息
