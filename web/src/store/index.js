@@ -390,9 +390,8 @@ export const useChatStore = create((set, get) => ({
   sendStoryMessage: async (chatId, content) => {
     if (sendingChatIds.has(chatId) || get().streamingChatId === chatId) throw chatBusyError()
     sendingChatIds.add(chatId)
-    const userMsg = { id: createTempMessageId('temp-story-user'), chat_id: chatId, role: 'user', content, created_at: new Date().toISOString() }
     const aiMsg = { id: createTempMessageId('temp-story-ai'), chat_id: chatId, role: 'assistant', content: '', created_at: new Date().toISOString(), isStreaming: true }
-    set(s => ({ activeChatId: chatId, messages: [...(s.activeChatId === chatId ? s.messages : []), userMsg, aiMsg], streaming: true, streamingChatId: chatId, streamKind: 'story-send', streamContent: '', storyStatus: s.storyStatus }))
+    set(s => ({ activeChatId: chatId, messages: [...(s.activeChatId === chatId ? s.messages : []), aiMsg], streaming: true, streamingChatId: chatId, streamKind: 'story-send', streamContent: '', storyStatus: s.storyStatus }))
     try {
       const headers = { 'Content-Type': 'application/json' }
       const token = getToken()
@@ -432,7 +431,7 @@ export const useChatStore = create((set, get) => ({
       set(s => ({ messages: s.activeChatId === chatId ? normalizeChatMessages(freshMessages, fullContent) : s.messages }))
       await get().fetchStoryStatus(chatId).catch(() => {})
     } catch (err) {
-      set(s => ({ messages: s.activeChatId === chatId ? s.messages.filter(m => m.id !== userMsg.id && m.id !== aiMsg.id) : s.messages }))
+      set(s => ({ messages: s.activeChatId === chatId ? s.messages.filter(m => m.id !== aiMsg.id) : s.messages }))
       try { await get().fetchMessages(chatId, { background: true }) } catch {}
       throw err
     } finally {
@@ -448,18 +447,19 @@ export const useChatStore = create((set, get) => ({
     }
     sendingChatIds.add(chatId)
 
-    const userMsg = {
-      id: createTempMessageId('temp-user'),
+    const aiMsgPlaceholder = {
+      id: createTempMessageId('temp-ai'),
       chat_id: chatId,
-      role: 'user',
-      content,
+      role: 'assistant',
+      content: '',
       created_at: new Date().toISOString(),
+      isStreaming: true,
     }
     set(s => ({
       activeChatId: chatId,
       messages: [
         ...(s.activeChatId === chatId ? s.messages : []),
-        userMsg,
+        aiMsgPlaceholder,
       ],
       streaming: true,
       streamingChatId: chatId,
@@ -474,17 +474,6 @@ export const useChatStore = create((set, get) => ({
     }))
 
     const requestStartedAt = Date.now()
-
-    // 先添加一个空的 AI 消息占位
-    const aiMsgPlaceholder = {
-      id: createTempMessageId('temp-ai'),
-      chat_id: chatId,
-      role: 'assistant',
-      content: '',
-      created_at: new Date().toISOString(),
-      isStreaming: true,
-    }
-    set(s => ({ messages: [...s.messages, aiMsgPlaceholder] }))
 
     try {
       const sseHeaders = { 'Content-Type': 'application/json' }
