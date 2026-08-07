@@ -511,6 +511,7 @@ export const useChatStore = create((set, get) => ({
         }
       })()
 
+      const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let fullContent = ''
       let buffer = '' // 行缓冲，处理跨 chunk 的 SSE 行
