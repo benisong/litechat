@@ -50,6 +50,25 @@ func TestManifestCompilerHandlesThinkTagsAndFencedJSON(t *testing.T) {
 	}
 }
 
+func TestManifestCompilerNormalizesSynonymOperations(t *testing.T) {
+	db := newServiceSchedulerTestDB(t)
+	defer db.Close()
+	storyStore := store.NewSchedulerStore(db)
+	compiler := NewManifestCompiler(storyStore, fakeSchedulerCompletionClient{
+		response: `{"manifest_version":1,"fields":{"score":{"type":"integer","writable":true}},"observation_rules":[{"observation_key":"score","value":10,"effects":[{"field":"score","operation":"add","value":5}]}]}`,
+	})
+	manifest, err := compiler.Compile(context.Background(), ManifestCompileInput{
+		CharacterID: "char-1", CharacterVersion: "v1", WorldbookVersionHash: "hash-1",
+		CompilerModel: "smart-model", PromptVersion: "compiler-v1", CompileOnlyText: "剧情",
+	})
+	if err != nil {
+		t.Fatalf("Compile with synonym operation 'add': %v", err)
+	}
+	if manifest.Status != model.ManifestStatusReady {
+		t.Fatalf("expected ready manifest, got %s", manifest.Status)
+	}
+}
+
 func TestManifestCompilerMarksInvalidManifestFailed(t *testing.T) {
 	db := newServiceSchedulerTestDB(t)
 	defer db.Close()

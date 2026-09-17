@@ -123,7 +123,8 @@ const manifestCompilerSystemPrompt = `你是剧情 Manifest 编译器。请把�
 只允许输出 manifest_version、fields、observation_rules 三个顶层字段。
 manifest_version 必须输出数字 1，不要输出字符串 "1.0"。
 fields 的每个字段必须包含 type 和 writable；type 只能是 boolean、integer、number、string、enum、string_set、event_set，禁止使用 array 或其他类型。
-observation_rules 只能声明 observation_key、value、effects、events。
+observation_rules 声明 observation_key、value、effects、events。
+effects 中的 operation 只能是以下四种之一："set"、"increment"、"decrement"、"append"，禁止输出其他 operation 名称（例如 update、add、remove、change、assign 等请映射为 set/increment/append）。
 不要输出 SQL、代码、解释文字或未声明字段。只输出 JSON。`
 
 func validateManifestJSON(raw string) error {
@@ -154,6 +155,7 @@ func validateManifestJSON(raw string) error {
 		rule.ObservationKey = resolveManifestFieldName(rule.ObservationKey, document.Fields)
 		for effectIndex := range rule.Effects {
 			rule.Effects[effectIndex].Field = resolveManifestFieldName(rule.Effects[effectIndex].Field, document.Fields)
+			rule.Effects[effectIndex].Operation = resolveManifestOperation(rule.Effects[effectIndex].Operation, document.Fields[rule.Effects[effectIndex].Field])
 		}
 	}
 	seenEvents := map[string]bool{}
@@ -187,6 +189,44 @@ func validateManifestJSON(raw string) error {
 		document.ObservationRules[index].Events = filteredEvents
 	}
 	return nil
+}
+
+func resolveManifestOperation(op string, field manifestFieldJSON) string {
+	op = strings.ToLower(strings.TrimSpace(op))
+	switch op {
+	case "set", "increment", "decrement", "append":
+		return op
+	case "add", "plus", "inc", "increase":
+		if field.Type == "string_set" || field.Type == "event_set" {
+			return "append"
+		}
+		return "increment"
+	case "minus", "sub", "dec", "decrease", "reduce":
+		return "decrement"
+	case "push", "insert", "attach":
+		return "append"
+	case "update", "assign", "change", "write", "replace", "modify", "put", "":
+		return "set"
+	default:
+		// 模糊匹配
+		candidates := []string{"set", "increment", "decrement", "append"}
+		best := ""
+		for _, candidate := range candidates {
+			if levenshteinDistance(op, candidate) <= 2 {
+				if best != "" {
+					return op
+				}
+				best = candidate
+			}
+		}
+		if best != "" {
+			return best
+		}
+		if field.Type == "string_set" || field.Type == "event_set" {
+			return "append"
+		}
+		return "set"
+	}
 }
 
 func resolveManifestFieldType(fieldType string) string {

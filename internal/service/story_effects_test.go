@@ -49,3 +49,25 @@ func TestApplyStateEffectsRejectsUndeclaredOrReadOnlyField(t *testing.T) {
 		t.Fatal("expected undeclared field to fail")
 	}
 }
+
+func TestApplyStateEffectsSupportsSynonymOperations(t *testing.T) {
+	state := map[string]any{"trust": 50, "clues": []any{"first"}}
+	spec := map[string]FieldSpec{
+		"trust": {Type: "integer", Writable: true, Min: 0, Max: 100, HasMin: true, HasMax: true},
+		"clues": {Type: "string_set", Writable: true},
+	}
+	err := ApplyStateEffects(state, []StateEffect{
+		{Field: "trust", Operation: "add", Value: 20},
+		{Field: "clues", Operation: "push", Value: "second"},
+	}, spec)
+	if err != nil {
+		t.Fatalf("ApplyStateEffects with synonyms: %v", err)
+	}
+	if state["trust"] != 70 {
+		t.Fatalf("expected trust 70, got %v", state["trust"])
+	}
+	clues := state["clues"].([]any)
+	if len(clues) != 2 {
+		t.Fatalf("expected 2 clues, got %#v", clues)
+	}
+}

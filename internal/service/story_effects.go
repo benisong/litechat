@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 )
 
 // FieldSpec 是经过 Manifest 校验后的动态字段白名单。
@@ -47,15 +48,20 @@ func ApplyStateEffects(state map[string]any, effects []StateEffect, specs map[st
 }
 
 func applyStateEffect(state map[string]any, effect StateEffect, spec FieldSpec) error {
-	switch effect.Operation {
-	case "set":
+	op := strings.ToLower(strings.TrimSpace(effect.Operation))
+	switch op {
+	case "set", "update", "assign", "write", "replace", "modify", "put":
 		value, err := normalizeFieldValue(effect.Value, spec)
 		if err != nil {
 			return fmt.Errorf("set %s: %w", effect.Field, err)
 		}
 		state[effect.Field] = value
 		return nil
-	case "increment", "decrement":
+	case "increment", "decrement", "add", "plus", "inc", "increase", "minus", "sub", "dec", "decrease", "reduce":
+		if spec.Type == "string_set" || spec.Type == "event_set" {
+			// 如果集合类型收到了 add/append
+			return applyAppendEffect(state, effect, spec)
+		}
 		if spec.Type != "integer" && spec.Type != "number" && spec.Type != "counter" {
 			return fmt.Errorf("field %s does not support numeric operation", effect.Field)
 		}
@@ -71,7 +77,7 @@ func applyStateEffect(state map[string]any, effect StateEffect, spec FieldSpec) 
 				return fmt.Errorf("current value for %s is not numeric", effect.Field)
 			}
 		}
-		if effect.Operation == "decrement" {
+		if op == "decrement" || op == "minus" || op == "sub" || op == "dec" || op == "decrease" || op == "reduce" {
 			current -= amount
 		} else {
 			current += amount
@@ -83,25 +89,35 @@ func applyStateEffect(state map[string]any, effect StateEffect, spec FieldSpec) 
 			state[effect.Field] = current
 		}
 		return nil
-	case "append":
-		if spec.Type != "string_set" && spec.Type != "event_set" {
-			return fmt.Errorf("field %s does not support append", effect.Field)
-		}
-		value, ok := effect.Value.(string)
-		if !ok || value == "" {
-			return fmt.Errorf("append value for %s must be a non-empty string", effect.Field)
-		}
-		items, _ := state[effect.Field].([]any)
-		for _, item := range items {
-			if item == value {
-				return nil
-			}
-		}
-		state[effect.Field] = append(items, value)
-		return nil
+	case "append", "push", "insert", "attach":
+		return applyAppendEffect(state, effect, spec)
 	default:
-		return fmt.Errorf("unsupported state operation: %s", effect.Operation)
+		// 默认兜底为 set
+		value, err := normalizeFieldValue(effect.Value, spec)
+		if err != nil {
+			return fmt.Errorf("apply %s: %w", effect.Field, err)
+		}
+		state[effect.Field] = value
+		return nil
 	}
+}
+
+func applyAppendEffect(state map[string]any, effect StateEffect, spec FieldSpec) error {
+	if spec.Type != "string_set" && spec.Type != "event_set" {
+		return fmt.Errorf("field %s does not support append", effect.Field)
+	}
+	value, ok := effect.Value.(string)
+	if !ok || value == "" {
+		return fmt.Errorf("append value for %s must be a non-empty string", effect.Field)
+	}
+	items, _ := state[effect.Field].([]any)
+	for _, item := range items {
+		if item == value {
+			return nil
+		}
+	}
+	state[effect.Field] = append(items, value)
+	return nil
 }
 
 func normalizeFieldValue(value any, spec FieldSpec) (any, error) {
