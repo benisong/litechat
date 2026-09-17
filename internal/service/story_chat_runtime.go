@@ -98,10 +98,10 @@ func (r *StoryChatRuntime) rollbackTurn(record *model.ChatSchedulerRecord, userM
 }
 
 func (r *StoryChatRuntime) SendMessage(ctx context.Context, input ChatTurnInput, callback StreamCallback) (ChatRuntimeResult, error) {
-	return r.SendMessageWithEvents(ctx, input, callback, nil)
+	return r.SendMessageWithEvents(ctx, input, callback, nil, nil)
 }
 
-func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error) {
+func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error, userCallback func(*model.Message) error) (ChatRuntimeResult, error) {
 	if err := r.validate(); err != nil {
 		return ChatRuntimeResult{}, err
 	}
@@ -128,8 +128,15 @@ func (r *StoryChatRuntime) SendMessageWithEvents(ctx context.Context, input Chat
 	if err := r.messageStore.Create(userMessage); err != nil {
 		return ChatRuntimeResult{}, err
 	}
+	if userCallback != nil {
+		if err := userCallback(userMessage); err != nil {
+			_ = r.messageStore.DeleteByID(userMessage.ID)
+			return ChatRuntimeResult{}, err
+		}
+	}
 	assistantMessage := &model.Message{ChatID: input.ChatID, Role: "assistant", Content: ""}
 	if err := r.messageStore.Create(assistantMessage); err != nil {
+		_ = r.messageStore.DeleteByID(userMessage.ID)
 		return ChatRuntimeResult{}, err
 	}
 	record := &model.ChatSchedulerRecord{ChatID: input.ChatID, UserMessageID: userMessage.ID, AssistantMessageID: assistantMessage.ID, TurnSeq: assistantMessage.Seq}

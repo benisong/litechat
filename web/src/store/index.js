@@ -341,7 +341,7 @@ export const useChatStore = create((set, get) => ({
         // An older GET may finish after an optimistic send has started. Never
         // let that stale snapshot erase the just-sent message or its placeholder.
         if (s.streaming && s.streamingChatId === chatId) {
-          if (background && s.streamKind === 'send') {
+          if (background && (s.streamKind === 'send' || s.streamKind === 'story-send')) {
             const persistedUser = normalizedMessages.find(message => (
               message.seq > s.streamBaseSeq && message.role === 'user'
             ))
@@ -390,8 +390,29 @@ export const useChatStore = create((set, get) => ({
   sendStoryMessage: async (chatId, content) => {
     if (sendingChatIds.has(chatId) || get().streamingChatId === chatId) throw chatBusyError()
     sendingChatIds.add(chatId)
+    const optimisticUserMsg = {
+      id: createTempMessageId('temp-user'),
+      chat_id: chatId,
+      role: 'user',
+      content,
+      created_at: new Date().toISOString(),
+    }
     const aiMsg = { id: createTempMessageId('temp-story-ai'), chat_id: chatId, role: 'assistant', content: '', created_at: new Date().toISOString(), isStreaming: true }
-    set(s => ({ activeChatId: chatId, messages: [...(s.activeChatId === chatId ? s.messages : []), aiMsg], streaming: true, streamingChatId: chatId, streamKind: 'story-send', streamContent: '', storyStatus: s.storyStatus }))
+    set(s => ({
+      activeChatId: chatId,
+      messages: [...(s.activeChatId === chatId ? s.messages : []), optimisticUserMsg, aiMsg],
+      streaming: true,
+      streamingChatId: chatId,
+      streamKind: 'story-send',
+      streamBaseSeq: s.activeChatId === chatId
+        ? s.messages.reduce(
+            (latest, message) => Math.max(latest, Number(message.seq) || 0),
+            0
+          )
+        : 0,
+      streamContent: '',
+      storyStatus: s.storyStatus,
+    }))
     try {
       const headers = { 'Content-Type': 'application/json' }
       const token = getToken()
@@ -417,6 +438,13 @@ export const useChatStore = create((set, get) => ({
           if (!data) continue
           const parsed = JSON.parse(data)
           if (parsed.error) throw new Error(parsed.error)
+          if (parsed.user_message) {
+            set(s => {
+              if (s.messages.some(message => message.id === parsed.user_message.id)) return {}
+              const withoutOptimistic = s.messages.filter(message => message.id !== optimisticUserMsg.id && message.id !== aiMsg.id)
+              return { messages: normalizeChatMessages([...withoutOptimistic, parsed.user_message, aiMsg]) }
+            })
+          }
           if (parsed.token) {
             fullContent += parsed.token
             set(s => ({ messages: s.messages.map(m => m.id === aiMsg.id ? { ...m, content: fullContent } : m), streamContent: fullContent }))
@@ -431,7 +459,7 @@ export const useChatStore = create((set, get) => ({
       set(s => ({ messages: s.activeChatId === chatId ? normalizeChatMessages(freshMessages, fullContent) : s.messages }))
       await get().fetchStoryStatus(chatId).catch(() => {})
     } catch (err) {
-      set(s => ({ messages: s.activeChatId === chatId ? s.messages.filter(m => m.id !== aiMsg.id) : s.messages }))
+      set(s => ({ messages: s.activeChatId === chatId ? s.messages.filter(m => m.id !== aiMsg.id && m.id !== optimisticUserMsg.id) : s.messages }))
       try { await get().fetchMessages(chatId, { background: true }) } catch {}
       throw err
     } finally {
@@ -447,6 +475,13 @@ export const useChatStore = create((set, get) => ({
     }
     sendingChatIds.add(chatId)
 
+    const optimisticUserMsg = {
+      id: createTempMessageId('temp-user'),
+      chat_id: chatId,
+      role: 'user',
+      content,
+      created_at: new Date().toISOString(),
+    }
     const aiMsgPlaceholder = {
       id: createTempMessageId('temp-ai'),
       chat_id: chatId,
@@ -459,6 +494,7 @@ export const useChatStore = create((set, get) => ({
       activeChatId: chatId,
       messages: [
         ...(s.activeChatId === chatId ? s.messages : []),
+        optimisticUserMsg,
         aiMsgPlaceholder,
       ],
       streaming: true,
@@ -502,7 +538,7 @@ export const useChatStore = create((set, get) => ({
           if (persistedUser) {
             set(s => (
               s.activeChatId === chatId && s.streamingChatId === chatId
-                ? { messages: [...normalized, aiMsgPlaceholder] }
+                ? { messages: [...normalized.filter(m => m.id !== optimisticUserMsg.id), aiMsgPlaceholder] }
                 : {}
             ))
             return
@@ -542,7 +578,7 @@ export const useChatStore = create((set, get) => ({
             if (parsed.user_message) {
               set(s => {
                 if (s.messages.some(message => message.id === parsed.user_message.id)) return {}
-                const withoutPlaceholder = s.messages.filter(message => message.id !== aiMsgPlaceholder.id)
+                const withoutPlaceholder = s.messages.filter(message => message.id !== aiMsgPlaceholder.id && message.id !== optimisticUserMsg.id)
                 return { messages: normalizeChatMessages([...withoutPlaceholder, parsed.user_message, aiMsgPlaceholder]) }
               })
             }
@@ -590,7 +626,7 @@ export const useChatStore = create((set, get) => ({
     } catch (err) {
       set(s => ({
         ...(s.activeChatId === chatId
-          ? { messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id) }
+          ? { messages: s.messages.filter(m => m.id !== aiMsgPlaceholder.id && m.id !== optimisticUserMsg.id) }
           : {}),
         streaming: false,
         streamingChatId: null,

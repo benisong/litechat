@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"litechat/internal/model"
+)
 
 // ChatTurnInput 是运行时处理一轮聊天所需的最小输入。
 type ChatTurnInput struct {
@@ -39,5 +42,5 @@ type StorySchedulerRetryRuntime interface {
 
 // StoryMessageRuntime 是复杂剧情消息入口的最小接口。
 type StoryMessageRuntime interface {
-	SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error) (ChatRuntimeResult, error)
+	SendMessageWithEvents(ctx context.Context, input ChatTurnInput, callback StreamCallback, statusCallback func(StoryRuntimeStatusEvent) error, userCallback func(*model.Message) error) (ChatRuntimeResult, error)
 }

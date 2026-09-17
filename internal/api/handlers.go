@@ -814,6 +814,8 @@ func (h *Handlers) SendStoryMessage(c *gin.Context) {
 			payload["message"] = event.ErrorMessage
 		}
 		return writeEvent(payload)
+	}, func(userMsg *model.Message) error {
+		return writeEvent(map[string]any{"user_message": userMsg})
 	})
 	if err != nil {
 		_ = writeEvent(map[string]string{"error": err.Error()})

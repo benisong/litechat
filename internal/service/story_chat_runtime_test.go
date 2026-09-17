@@ -66,7 +66,7 @@ func TestStoryChatRuntimeRunsIndependentTurn(t *testing.T) {
 	got, err := runtime.SendMessageWithEvents(context.Background(), ChatTurnInput{ChatID: chat.ID, UserID: user.ID, Content: "开始剧情"}, nil, func(event StoryRuntimeStatusEvent) error {
 		events = append(events, event)
 		return nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}

@@ -13,7 +13,12 @@ import (
 
 type fakeStoryMessageRuntime struct{}
 
-func (fakeStoryMessageRuntime) SendMessageWithEvents(_ context.Context, _ service.ChatTurnInput, callback service.StreamCallback, statusCallback func(service.StoryRuntimeStatusEvent) error) (service.ChatRuntimeResult, error) {
+func (fakeStoryMessageRuntime) SendMessageWithEvents(_ context.Context, _ service.ChatTurnInput, callback service.StreamCallback, statusCallback func(service.StoryRuntimeStatusEvent) error, userCallback func(*model.Message) error) (service.ChatRuntimeResult, error) {
+	if userCallback != nil {
+		if err := userCallback(&model.Message{ID: "msg-user-1", Content: "开始", Role: "user"}); err != nil {
+			return service.ChatRuntimeResult{}, err
+		}
+	}
 	if err := callback("你好"); err != nil {
 		return service.ChatRuntimeResult{}, err
 	}
@@ -37,7 +42,7 @@ func TestSendStoryMessageWritesTokenAndSchedulerSSE(t *testing.T) {
 	ctx.Params = gin.Params{{Key: "id", Value: "chat-1"}}
 	h.SendStoryMessage(ctx)
 	body := recorder.Body.String()
-	for _, expected := range []string{`"token":"你好"`, `"scheduler_status":"processing"`, `"scheduler_status":"success"`, `"done":true`} {
+	for _, expected := range []string{`"user_message"`, `"token":"你好"`, `"scheduler_status":"processing"`, `"scheduler_status":"success"`, `"done":true`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("SSE missing %s: %s", expected, body)
 		}

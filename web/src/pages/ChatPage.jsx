@@ -268,7 +268,7 @@ export default function ChatPage() {
   }
 
   // Keep the synthetic opening message visible during the first round-trip.
-  const hasPersistedMessages = messages.some(msg => !String(msg.id || '').startsWith('temp-'))
+  const hasPersistedMessages = messages.some(msg => !String(msg.id || '').startsWith('temp-') || msg.role === 'user')
   const displayScenario = renderRolePlaceholders(character?.scenario, { character, user })
   const displayFirstMsg = renderRolePlaceholders(character?.first_msg, { character, user })
   const showOpeningScene = !loading && displayScenario && !hasPersistedMessages
