@@ -56,7 +56,7 @@ func (c *OpenAICompletionClient) Complete(ctx context.Context, modelName string,
 		Model:       modelName,
 		Messages:    messages,
 		Temperature: 0.1,
-		MaxTokens:   2048,
+		MaxTokens:   4096,
 		TopP:        0.9,
 		Stream:      false,
 	}

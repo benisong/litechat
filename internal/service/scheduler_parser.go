@@ -12,7 +12,7 @@ const schedulerOutputSchemaVersion = 1
 // ParseSchedulerOutput 解析调度模型输出。
 // 允许模型在 JSON 外包裹说明文字或 markdown code fence，但最终必须得到一个合法的固定版本 JSON。
 func ParseSchedulerOutput(raw string) (*model.SchedulerOutput, error) {
-	candidate := strings.TrimSpace(raw)
+	candidate := strings.TrimSpace(cleanAssistantContent(raw))
 	if candidate == "" {
 		return nil, fmt.Errorf("scheduler output is empty")
 	}
@@ -102,5 +102,5 @@ func extractSchedulerJSONObject(value string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("scheduler output contains an incomplete JSON object")
+	return "", fmt.Errorf("模型输出的 JSON 不完整或已被截断 (incomplete JSON object)")
 }

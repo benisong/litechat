@@ -24,6 +24,16 @@ func TestParseSchedulerOutputAcceptsFencedJSON(t *testing.T) {
 	}
 }
 
+func TestParseSchedulerOutputCleansThinkTags(t *testing.T) {
+	got, err := ParseSchedulerOutput("<think>\nHere is some reasoning about the story...\n</think>\n```json\n{\"schema_version\":1,\"observations\":[]}\n```")
+	if err != nil {
+		t.Fatalf("ParseSchedulerOutput with think tag: %v", err)
+	}
+	if got.SchemaVersion != 1 {
+		t.Fatalf("expected schema version 1, got %d", got.SchemaVersion)
+	}
+}
+
 func TestParseSchedulerOutputExtractsJSONFromExplanation(t *testing.T) {
 	got, err := ParseSchedulerOutput("本轮没有重大变化。\n{\"schema_version\":1,\"observations\":[]}")
 	if err != nil {

@@ -31,6 +31,25 @@ func TestManifestCompilerCreatesReadyManifestFromModelOutput(t *testing.T) {
 	}
 }
 
+func TestManifestCompilerHandlesThinkTagsAndFencedJSON(t *testing.T) {
+	db := newServiceSchedulerTestDB(t)
+	defer db.Close()
+	storyStore := store.NewSchedulerStore(db)
+	compiler := NewManifestCompiler(storyStore, fakeSchedulerCompletionClient{
+		response: "<think>\nThinking about compiling worldbook...\n</think>\n```json\n{\"manifest_version\":1,\"fields\":{\"facts.resource_request\":{\"type\":\"boolean\",\"writable\":true}},\"observation_rules\":[]}\n```",
+	})
+	manifest, err := compiler.Compile(context.Background(), ManifestCompileInput{
+		CharacterID: "char-1", CharacterVersion: "v1", WorldbookVersionHash: "hash-1",
+		CompilerModel: "smart-model", PromptVersion: "compiler-v1", CompileOnlyText: "完整剧情世界书内容",
+	})
+	if err != nil {
+		t.Fatalf("Compile with think tags and fence: %v", err)
+	}
+	if manifest.Status != model.ManifestStatusReady || manifest.CompiledJSON == "" {
+		t.Fatalf("unexpected manifest: %+v", manifest)
+	}
+}
+
 func TestManifestCompilerMarksInvalidManifestFailed(t *testing.T) {
 	db := newServiceSchedulerTestDB(t)
 	defer db.Close()

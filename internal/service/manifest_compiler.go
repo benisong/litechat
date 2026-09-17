@@ -100,7 +100,9 @@ func (c *ManifestCompiler) Compile(ctx context.Context, input ManifestCompileInp
 	if err != nil {
 		return fail("compiler_request", err)
 	}
-	jsonText, err := extractSchedulerJSONObject(raw)
+	cleanedRaw := cleanAssistantContent(raw)
+	cleanedRaw = stripJSONFence(cleanedRaw)
+	jsonText, err := extractSchedulerJSONObject(cleanedRaw)
 	if err != nil {
 		return fail("compiler_output", err)
 	}
